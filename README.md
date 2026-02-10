@@ -36,11 +36,11 @@ The application consists of a GTK-based GUI and a single-instance background dae
 
 Once available on Flathub, AudioRouter can be installed with:
 
-flatpak install flathub de.pasuki.audiorouter
+    flatpak install flathub de.pasuki.audiorouter
 
 Run the application:
 
-flatpak run de.pasuki.audiorouter
+    flatpak run de.pasuki.audiorouter
 
 ---
 
@@ -48,16 +48,16 @@ flatpak run de.pasuki.audiorouter
 
 Clone the repository:
 
-git clone https://github.com/PasukiTV/audiorouter.git
-cd audiorouter
+    git clone https://github.com/PasukiTV/audiorouter.git
+    cd audiorouter
 
 Build and install the Flatpak locally:
 
-flatpak-builder --force-clean --user --install build-dir flatpak/de.pasuki.audiorouter.yml
+    flatpak-builder --force-clean --user --install build-dir flatpak/de.pasuki.audiorouter.yml
 
 Run AudioRouter:
 
-flatpak run de.pasuki.audiorouter
+    flatpak run de.pasuki.audiorouter
 
 ---
 
@@ -67,7 +67,7 @@ AudioRouter uses a background daemon to apply audio routing rules automatically.
 
 Start the daemon manually:
 
-flatpak run de.pasuki.audiorouter --background
+    flatpak run de.pasuki.audiorouter --background
 
 The daemon is locked to a single instance.
 Starting it multiple times will not create duplicate background processes.
@@ -80,7 +80,7 @@ Autostart can be enabled from within the GUI.
 
 When enabled, AudioRouter creates the following file:
 
-~/.config/autostart/de.pasuki.audiorouter.autostart.desktop
+    ~/.config/autostart/de.pasuki.audiorouter.autostart.desktop
 
 This will automatically start the background daemon when you log in.
 
@@ -90,11 +90,9 @@ This will automatically start the background daemon when you log in.
 
 Check whether the background daemon is running:
 
-ps aux | grep audiorouter
-
-Stop all AudioRouter processes:
-
-pkill -f audiorouter
+    ps aux | grep audiorouter
+    Stop all AudioRouter processes:
+    pkill -f audiorouter
 
 ---
 
