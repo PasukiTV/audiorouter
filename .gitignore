@@ -1,26 +1,22 @@
-# Python
+# ===== Python =====
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.so
 *.egg-info/
 .eggs/
 .venv/
 venv/
 
-# Build artifacts
+# ===== Build artifacts =====
 build/
 dist/
 
-# Flatpak builder
+# ===== Flatpak =====
 .flatpak-builder/
 build-dir/
 
-# IDE
+# ===== IDEs =====
 .vscode/
 .idea/
 
-# Python build artifacts
-*.egg-info/
-__pycache__/
+# ===== OS =====
+.DS_Store
