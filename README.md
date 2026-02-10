@@ -28,7 +28,7 @@ that applies routing rules automatically.
 
 # Installation
 
-# Installation via Flathub (recommended)
+## Installation via Flathub (recommended)
 
 - Once available on Flathub, AudioRouter can be installed with:
 
@@ -38,7 +38,7 @@ that applies routing rules automatically.
 
     flatpak run de.pasuki.audiorouter
 
-# Manual Installation (from source)
+## Manual Installation (from source)
 
 - Clone the repository:
 
@@ -53,7 +53,7 @@ that applies routing rules automatically.
 
     flatpak run de.pasuki.audiorouter
 
-# Background Daemon
+## Background Daemon
 
 AudioRouter uses a background daemon to apply audio routing rules automatically.
 
@@ -64,7 +64,7 @@ AudioRouter uses a background daemon to apply audio routing rules automatically.
 The daemon is locked to a single instance.
 Starting it multiple times will not create duplicate background processes.
 
-# Autostart
+## Autostart
 
 Autostart can be enabled from within the GUI.
 
@@ -74,7 +74,7 @@ When enabled, AudioRouter creates the following file:
 
 This will automatically start the background daemon when you log in.
 
-# Debugging
+## Debugging
 
 Check whether the background daemon is running:
 
@@ -82,11 +82,11 @@ Check whether the background daemon is running:
     Stop all AudioRouter processes:
     pkill -f audiorouter
 
-# License
+## License
 
 MIT License
 
-# Contributing
+## Contributing
 
 Contributions, bug reports and feature requests are welcome.
 Please use the GitHub issue tracker for reporting problems or ideas.
