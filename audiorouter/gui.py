@@ -1,0 +1,402 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Gtk, Adw
+
+from autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
+
+
+from config import load_config, save_config
+import pactl as pa
+# Apply changes immediately (no "Apply" button)
+from audiorouter_core import apply_once
+
+APP_ID = "de.pasuki.audiorouter"
+
+import re
+
+DONATE_URL = "https://www.paypal.me/PascalSmigielski"
+
+def open_donate(_btn):
+    launcher = Gtk.UriLauncher.new(DONATE_URL)
+    launcher.launch(None)
+
+
+def slugify_label(label: str) -> str:
+    s = label.strip().lower()
+    s = s.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-")
+    return s or "bus"
+
+def make_bus_name(label: str, existing_names: set[str]) -> str:
+    base = f"vsink.{slugify_label(label)}"
+    name = base
+    i = 2
+    while name in existing_names:
+        name = f"{base}-{i}"
+        i += 1
+    return name
+
+def friendly_sink_list():
+    sinks = pa.list_sinks()
+    items = [("default", "Default (current default sink)")]
+    for s in sinks:
+        items.append((s["name"], s["name"]))
+    return items
+
+
+class MainWindow(Adw.ApplicationWindow):
+    def __init__(self, app: Adw.Application):
+        super().__init__(application=app)
+        self.set_title("audiorouter")
+        self.set_default_size(980, 620)
+
+        self.cfg = load_config()
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                       margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+        self.set_content(root)
+
+        header = Adw.HeaderBar()
+        root.append(header)
+
+        btn_donate = Gtk.Button(label="Donate ❤️")
+        btn_donate.add_css_class("suggested-action")  # schöner GNOME-Look
+        btn_donate.connect("clicked", open_donate)
+
+        header.pack_start(btn_donate)
+
+        # Autostart toggle (reboot-fest ohne GUI öffnen)
+        self.autostart_check = Gtk.CheckButton(label="Beim Login automatisch starten (Background)")
+        self.autostart_check.set_active(autostart_is_enabled())
+        self.autostart_check.connect("toggled", self.on_autostart_toggled)
+        root.append(self.autostart_check)
+
+
+        btn_refresh = Gtk.Button(label="Refresh")
+        btn_refresh.connect("clicked", lambda *_: self.refresh_all())
+        header.pack_end(btn_refresh)
+
+        split = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
+        root.append(split)
+
+        # LEFT: buses
+        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        split.set_start_child(left)
+
+        left_title = Gtk.Label(label="Buses (virtual sinks)", xalign=0)
+        left_title.add_css_class("title-3")
+        left.append(left_title)
+
+        self.bus_list = Gtk.ListBox()
+        self.bus_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        left.append(self.bus_list)
+
+        add_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.entry_bus_label = Gtk.Entry(placeholder_text="Browser")
+        self.entry_bus_label.connect("activate", lambda *_: self.add_bus())
+        btn_add = Gtk.Button(label="Add Bus")
+        btn_add.connect("clicked", lambda *_: self.add_bus())
+        add_row.append(self.entry_bus_label)
+        add_row.append(btn_add)
+        left.append(add_row)
+
+        # RIGHT: streams
+        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        split.set_end_child(right)
+
+        right_title = Gtk.Label(label="Running application streams", xalign=0)
+        right_title.add_css_class("title-3")
+        right.append(right_title)
+
+        self.stream_list = Gtk.ListBox()
+        self.stream_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        right.append(self.stream_list)
+
+
+        apply_once()
+        self.refresh_all()
+
+
+    def refresh_all(self):
+        self.cfg = load_config()
+        self.refresh_buses()
+        self.refresh_streams()
+
+    def on_autostart_toggled(self, btn: Gtk.CheckButton):
+        state = btn.get_active()
+        print("AUTOSTART TOGGLED:", state)
+
+        if state:
+            print("-> enable()")
+            autostart_enable()
+        else:
+            print("-> disable()")
+            autostart_disable()
+
+
+    def refresh_buses(self):
+        for child in list(self.bus_list):
+            self.bus_list.remove(child)
+
+        sink_items = friendly_sink_list()
+        sink_labels = [t for _, t in sink_items]
+
+        buses = self.cfg.get("buses", [])
+        if not buses:
+            # placeholder
+            row = Gtk.ListBoxRow()
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
+                          margin_top=6, margin_bottom=6, margin_start=6, margin_end=6)
+            row.set_child(box)
+            box.append(Gtk.Label(label="Noch keine Buses. Links unten Add Bus benutzen.", xalign=0))
+            self.bus_list.append(row)
+            return
+
+        for b in buses:
+            row = Gtk.ListBoxRow()
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
+                          margin_top=6, margin_bottom=6, margin_start=6, margin_end=6)
+            row.set_child(box)
+
+            name_lbl = Gtk.Label(label=b["name"], xalign=0)
+            name_lbl.set_hexpand(True)
+            box.append(name_lbl)
+
+            label_lbl = Gtk.Label(label=b.get("label", ""), xalign=0)
+            label_lbl.set_width_chars(12)
+            box.append(label_lbl)
+
+            dd = Gtk.DropDown.new_from_strings(sink_labels)
+            route_to = b.get("route_to", "default")
+            idx = 0
+            for i, (val, _) in enumerate(sink_items):
+                if val == route_to:
+                    idx = i
+                    break
+            dd.set_selected(idx)
+
+            def on_change(dropdown, _pspec, bus_name=b["name"], items=sink_items):
+                sel = dropdown.get_selected()
+                value = items[sel][0]
+                self.set_route(bus_name, value)
+
+            dd.connect("notify::selected", on_change)
+            box.append(dd)
+
+            btn_del = Gtk.Button(label="Delete")
+            btn_del.connect("clicked", lambda *_ , bus=b["name"]: self.delete_bus(bus))
+            box.append(btn_del)
+
+            self.bus_list.append(row)
+
+    def _stream_match_obj(self, app: str, binary: str, app_id: str) -> dict:
+        # gleiche Priorität wie beim Add Rule
+        if binary:
+            return {"binary": binary}
+        if app_id:
+            return {"app_id": app_id}
+        if app and app != "Unknown":
+            return {"app": app}
+        return {}
+
+    def _find_rule_index(self, rules: list, match: dict) -> int:
+        # exakter match-Vergleich: {"binary":"vivaldi"} etc.
+        for idx, r in enumerate(rules):
+            if r.get("match") == match:
+                return idx
+        return -1
+ 
+ 
+    def refresh_streams(self):
+        for child in list(self.stream_list):
+            self.stream_list.remove(child)
+
+        inputs = pa.list_sink_inputs()
+
+        def is_internal_loopback(inp):
+            props = inp.get("props", {})
+            media = (props.get("media.name") or "").lower()
+            nodeg = (props.get("node.group") or "").lower()
+            noden = (props.get("node.name") or "").lower()
+            return ("loopback" in media) or ("loopback" in nodeg) or (".loopback" in noden)
+
+        # Filter loopbacks (routing internals)
+        filtered = []
+        for i in inputs:
+            props = i.get("props", {})
+            if not props:
+                filtered.append(i)
+            else:
+                if not is_internal_loopback(i):
+                    filtered.append(i)
+        inputs = filtered
+
+        if not inputs:
+            row = Gtk.ListBoxRow()
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
+                          margin_top=6, margin_bottom=6, margin_start=6, margin_end=6)
+            row.set_child(box)
+            box.append(Gtk.Label(
+                label="Keine aktiven App-Audio-Streams. Starte Audio (YouTube/Spotify) und drücke Refresh.",
+                xalign=0
+            ))
+            self.stream_list.append(row)
+            return
+
+        buses = [b["name"] for b in self.cfg.get("buses", [])]
+
+        # Map sink_id -> sink_name
+        sink_id_to_name = {s["id"]: s["name"] for s in pa.list_sinks()}
+
+
+        for inp in inputs:
+            row = Gtk.ListBoxRow()
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
+                          margin_top=6, margin_bottom=6, margin_start=6, margin_end=6)
+            row.set_child(box)
+
+            props = inp.get("props", {})
+            app = props.get("application.name") or props.get("pipewire.access.portal.app_id") or "Unknown"
+            app_id = props.get("pipewire.access.portal.app_id") or ""
+            binary = props.get("application.process.binary") or ""
+            media = props.get("media.name") or ""
+
+            sid = str(inp.get("id"))
+
+            label = Gtk.Label(label=f"#{sid}  {app}  ({binary or '?'}) — {media}", xalign=0)
+            label.set_hexpand(True)
+            box.append(label)
+
+            if buses:
+                dd = Gtk.DropDown.new_from_strings(buses)
+
+                # Prefer: actual current sink of this stream (sink_id)
+                cur_sink_id = str(inp.get("sink_id", ""))
+                cur_sink_name = sink_id_to_name.get(cur_sink_id, "")
+
+                # If the stream is currently on one of our buses, select that bus in dropdown
+                if cur_sink_name in buses:
+                    dd.set_selected(buses.index(cur_sink_name))
+                else:
+                    # otherwise default to first bus (or keep 0)
+                    dd.set_selected(0)
+
+
+                def on_move(_btn, sink_input_id=sid, dropdown=dd):
+                    tgt = buses[dropdown.get_selected()]
+                    try:
+                        pa.move_sink_input(sink_input_id, tgt)
+                    except Exception:
+                        pass
+                    self.refresh_streams()
+
+                btn_move = Gtk.Button(label="Move to Bus")
+                btn_move.connect("clicked", on_move)
+                box.append(dd)
+                box.append(btn_move)
+
+                                # --- Rule UI (Add / Delete toggle) ---
+                cfg_now = load_config()
+                rules = cfg_now.get("rules", [])
+
+                match = self._stream_match_obj(app, binary, app_id)
+                rule_idx = self._find_rule_index(rules, match) if match else -1
+                has_rule = rule_idx >= 0
+
+                # If rule exists: preselect its target bus in the dropdown
+                if has_rule:
+                    target_bus = rules[rule_idx].get("target_bus")
+                    if target_bus in buses:
+                        dd.set_selected(buses.index(target_bus))
+
+                btn_rule = Gtk.Button(label=("Delete Rule" if has_rule else "Add Rule"))
+                if has_rule:
+                    btn_rule.add_css_class("suggested-action")  # visually highlight
+
+                def on_rule_toggle(_btn, dropdown=dd, match=match, has_rule=has_rule):
+                    if not match:
+                        return
+
+                    cfg = load_config()
+                    cfg.setdefault("rules", [])
+
+                    if has_rule:
+                        # delete rule
+                        cfg["rules"] = [r for r in cfg["rules"] if r.get("match") != match]
+                        save_config(cfg)
+                        apply_once()
+                        self.refresh_all()
+                        return
+
+                    # add rule
+                    target = buses[dropdown.get_selected()]
+                    cfg["rules"].append({"match": match, "target_bus": target})
+                    save_config(cfg)
+                    apply_once()
+                    self.refresh_all()
+
+                btn_rule.connect("clicked", on_rule_toggle)
+                box.append(btn_rule)
+
+
+            self.stream_list.append(row)
+
+    def add_bus(self):
+        label = self.entry_bus_label.get_text().strip()
+        if not label:
+            return
+
+        cfg = load_config()
+        cfg.setdefault("buses", [])
+
+        existing = {b.get("name") for b in cfg["buses"] if b.get("name")}
+        name = make_bus_name(label, existing)
+
+        cfg["buses"].append({"name": name, "label": label, "route_to": "default"})
+        save_config(cfg)
+
+        self.entry_bus_label.set_text("")
+        apply_once()
+        self.refresh_all()
+        self.entry_bus_label.grab_focus()
+
+
+
+    def delete_bus(self, bus_name: str):
+        cfg = load_config()
+        cfg["buses"] = [b for b in cfg.get("buses", []) if b["name"] != bus_name]
+        cfg["rules"] = [r for r in cfg.get("rules", []) if r.get("target_bus") != bus_name]
+        save_config(cfg)
+        apply_once()
+        self.refresh_all()
+
+    def set_route(self, bus_name: str, route_to: str):
+        cfg = load_config()
+        for b in cfg.get("buses", []):
+            if b["name"] == bus_name:
+                b["route_to"] = route_to
+        save_config(cfg)
+        apply_once()
+
+
+class App(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID, flags=0)
+
+    def do_activate(self):
+        win = MainWindow(self)
+        win.present()
+
+
+def main():
+    app = App()
+    app.run(None)
+
+
+if __name__ == "__main__":
+    main()

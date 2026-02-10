@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=audiorouter
+Exec=audiorouter
+Type=Application
+Categories=Audio;Utility;
+Icon=de.pasuki.audiorouter

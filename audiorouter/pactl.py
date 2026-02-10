@@ -1,0 +1,176 @@
+from __future__ import annotations
+import os
+import subprocess
+from typing import Dict, List, Any, Optional, Tuple
+from pathlib import Path
+
+def _in_flatpak() -> bool:
+    return bool(os.environ.get("FLATPAK_ID")) or Path("/.flatpak-info").exists()
+
+def _run_pactl(args: List[str]) -> Tuple[int, str, str]:
+    cmd = ["pactl", *args]
+    if _in_flatpak():
+        cmd = ["flatpak-spawn", "--host", *cmd]
+    p = subprocess.run(cmd, text=True, capture_output=True)
+    return p.returncode, p.stdout, p.stderr
+
+
+def pactl(*args: str) -> str:
+    rc, out, err = _run_pactl(list(args))
+    if rc != 0:
+        raise RuntimeError(err.strip() or "pactl failed")
+    return out
+
+def try_pactl(*args: str) -> str:
+    rc, out, _ = _run_pactl(list(args))
+    return out if rc == 0 else ""
+
+
+def get_default_sink() -> str:
+    return try_pactl("get-default-sink").strip()
+
+def list_sinks() -> List[Dict[str, str]]:
+    out = try_pactl("list", "short", "sinks")
+    sinks = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            sinks.append({"id": parts[0], "name": parts[1]})
+    return sinks
+
+def list_sources() -> List[Dict[str, str]]:
+    out = try_pactl("list", "short", "sources")
+    srcs = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            srcs.append({"id": parts[0], "name": parts[1]})
+    return srcs
+
+def list_modules() -> List[Dict[str, str]]:
+    out = try_pactl("list", "short", "modules")
+    mods = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            mods.append({"id": parts[0], "name": parts[1], "args": parts[2] if len(parts) > 2 else ""})
+    return mods
+
+def sink_exists(name: str) -> bool:
+    return any(s["name"] == name for s in list_sinks())
+
+def source_exists(name: str) -> bool:
+    return any(s["name"] == name for s in list_sources())
+
+def unload_module(module_id: str) -> None:
+    if module_id:
+        try_pactl("unload-module", module_id)
+
+def load_null_sink(bus_name: str, label: str) -> str:
+    out = pactl(
+        "load-module", "module-null-sink",
+        f"sink_name={bus_name}",
+        f"sink_properties=device.description={label}"
+    )
+    module_id = out.strip()
+
+    # 🔒 Monitor-Source verstecken (GANZ WICHTIG)
+    try:
+        pactl(
+            "set-source-properties",
+            f"{bus_name}.monitor",
+            "node.hidden=true",
+            "node.passive=true"
+        )
+    except Exception:
+        pass
+
+    # 🔒 Sink selbst sauber markieren
+    try:
+        pactl(
+            "set-sink-properties",
+            bus_name,
+            "media.class=Audio/Sink",
+            "node.hidden=false"
+        )
+    except Exception:
+        pass
+
+    return module_id
+
+
+def cleanup_loopbacks_for_route(source_name: str, sink_name: str) -> None:
+    # Entfernt alte Loopbacks, die genau diese Route machen
+    for m in list_modules():
+        if m.get("name") != "module-loopback":
+            continue
+        args = m.get("args", "") or ""
+        if f"source={source_name}" in args and f"sink={sink_name}" in args:
+            unload_module(m["id"])
+
+
+
+def load_loopback(source_name: str, sink_name: str, latency_msec: int = 30) -> str:
+    out = pactl(
+        "load-module", "module-loopback",
+        f"source={source_name}",
+        f"sink={sink_name}",
+        f"latency_msec={latency_msec}",
+        "sink_dont_move=true",
+    )
+    module_id = out.strip()
+
+    # Loopback-Knoten verstecken (PipeWire Name: loopback-<id>)
+    loop_name = f"loopback-{module_id}"
+    try:
+        pactl("set-sink-properties", loop_name, "node.hidden=true", "node.passive=true")
+    except Exception:
+        pass
+    try:
+        pactl("set-source-properties", loop_name, "node.hidden=true", "node.passive=true")
+    except Exception:
+        pass
+
+    return module_id
+
+
+
+def move_sink_input(sink_input_id: str, target_sink: str) -> None:
+    pactl("move-sink-input", sink_input_id, target_sink)
+
+# list_sink_inputs: DE/EN + nur in Eigenschaften/Properties parsen
+def list_sink_inputs() -> List[Dict[str, Any]]:
+    out = try_pactl("list", "sink-inputs")
+    items: List[Dict[str, Any]] = []
+    cur: Optional[Dict[str, Any]] = None
+    in_props = False
+
+    for raw in out.splitlines():
+        line = raw.strip()
+
+        if line.startswith("Sink Input #") or line.startswith("Ziel-Eingabe #"):
+            if cur:
+                items.append(cur)
+            cur = {"id": line.split("#", 1)[1].strip(), "props": {}}
+            in_props = False
+            continue
+
+        if cur is None:
+            continue
+
+        if line.startswith("Eigenschaften:") or line.startswith("Properties:"):
+            in_props = True
+            continue
+
+        if line.startswith("Sink:") or line.startswith("Ziel:"):
+            cur["sink_id"] = line.split(":", 1)[1].strip()
+            continue
+
+        if in_props and "=" in line:
+            k, v = line.split("=", 1)
+            cur["props"][k.strip()] = v.strip().strip('"')
+
+    if cur:
+        items.append(cur)
+
+    return items

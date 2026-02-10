@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>de.pasuki.audiorouter</id>
+  <name>audiorouter</name>
+  <summary>Virtual sinks and automatic routing for PipeWire/PulseAudio</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <description>
+    <p>
+      Create virtual sinks (“buses”), route them to any output device, and automatically assign applications to buses.
+      Designed for PipeWire/PulseAudio on Fedora.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">de.pasuki.audiorouter.desktop</launchable>
+
+  <provides>
+    <binary>audiorouter</binary>
+  </provides>
+
+  <developer_name>Pascal Smigielski</developer_name>
+</component>

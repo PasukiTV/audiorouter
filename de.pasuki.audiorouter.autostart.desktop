@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=audiorouter Background
+Exec=flatpak run de.pasuki.audiorouter --background
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
