@@ -3,7 +3,8 @@ from __future__ import annotations
 import subprocess
 import time
 import signal
-from audiorouter_core import apply_once
+from .core import apply_once
+
 
 _STOP = False
 

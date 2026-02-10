@@ -13,8 +13,8 @@ The reconciliation does four things:
 4) Applies stream rules by moving matching sink-inputs to the bus sink.
 """
 
-from config import load_config, load_state, save_state
-import pactl as pa
+from .config import load_config, load_state, save_state
+from . import pactl as pa
 
 
 def apply_once() -> None:

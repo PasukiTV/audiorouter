@@ -9,40 +9,40 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --socket=pulseaudio
-  - --talk-name=org.freedesktop.portal.Background
-  - --talk-name=org.freedesktop.portal.Desktop
   - --device=dri
   - --filesystem=xdg-config/autostart:rw
+  - --talk-name=org.freedesktop.portal.Background
+  - --talk-name=org.freedesktop.portal.Desktop
   - --talk-name=org.freedesktop.Flatpak
+  - --env=GTK_A11Y=none
+
 
 modules:
   - name: python-deps
     buildsystem: simple
     build-commands:
-      - pip3 install --no-deps --prefix=/app third_party_wheels/*.whl
+      - |
+        set -e
+        shopt -s nullglob
+        for whl in third_party_wheels/*.whl; do
+          echo "Installing $whl"
+          pip3 install --no-deps --prefix=/app "$whl"
+        done
     sources:
       - type: dir
-        path: third_party_wheels
+        path: ../third_party_wheels
         dest: third_party_wheels
-
-
 
   - name: audiorouter
     buildsystem: simple
     build-commands:
-      - install -D audiorouter.py /app/bin/audiorouter
-      - install -D audiorouter_gui.py /app/lib/audiorouter/audiorouter_gui.py
-      - install -D audiorouter_daemon.py /app/lib/audiorouter/audiorouter_daemon.py
-      - install -D audiorouter_core.py /app/lib/audiorouter/audiorouter_core.py
-      - install -D pactl.py /app/lib/audiorouter/pactl.py
-      - install -D config.py /app/lib/audiorouter/config.py
-      - install -D portal_background.py /app/lib/audiorouter/portal_background.py
-      - install -D de.pasuki.audiorouter.desktop /app/share/applications/de.pasuki.audiorouter.desktop
-      - install -D de.pasuki.audiorouter.metainfo.xml /app/share/metainfo/de.pasuki.audiorouter.metainfo.xml
-      - install -D de.pasuki.audiorouter.svg /app/share/icons/hicolor/scalable/apps/de.pasuki.audiorouter.svg
-      - install -D autostart.py /app/lib/audiorouter/autostart.py
-
-
+      - PIP_USE_PEP517=0 pip3 install --no-deps --no-build-isolation --prefix=/app ./src
+      - install -Dm644 src/data/de.pasuki.audiorouter.desktop /app/share/applications/de.pasuki.audiorouter.desktop
+      - install -Dm644 src/data/de.pasuki.audiorouter.metainfo.xml /app/share/metainfo/de.pasuki.audiorouter.metainfo.xml
+      - install -Dm644 src/data/de.pasuki.audiorouter.svg /app/share/icons/hicolor/scalable/apps/de.pasuki.audiorouter.svg
     sources:
       - type: dir
-        path: .
+        path: ..
+        dest: src
+
+

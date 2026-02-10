@@ -1,26 +1,21 @@
+# AudioRouter 🎧
 
-# audiorouter (WIP)
+AudioRouter is a modern Linux audio routing application built for PipeWire.
+It allows you to create virtual audio sinks and easily route applications
+like browsers, games or music players to them using a clean GTK interface.
 
-GUI + Hintergrund-Daemon zum Erstellen von virtuellen PipeWire/PulseAudio-Sinks ("Buses")
-und zum automatischen Routen von App-Audio-Streams auf diese Buses.
+## Features
 
-## Dateien
+- 🔊 Create and manage virtual PipeWire sinks
+- 🎚 Route applications to specific audio outputs
+- 🧩 Designed specifically for PipeWire
+- 🖥 Modern GTK-based user interface
+- 📦 Flatpak & Flathub ready
+- 🐧 Optimized for Fedora (works on all PipeWire-based distros)
 
-- `audiorouter_gui.py` – GTK4/Libadwaita GUI
-- `audiorouter_core.py` – **core**: `apply_once()` (idempotent)
-- `audiorouter_daemon.py` – sparsamer Daemon: reagiert auf `pactl subscribe`
-- `pactl.py` – pactl-Helfer
-- `config.py` – Config/State JSON
+## Requirements
 
-## Dev-Run
-
-```bash
-chmod +x audiorouter_gui.py audiorouter_daemon.py
-./audiorouter_gui.py
-```
-
-## Systemd User-Service (später Installation)
-
-Die Unit liegt unter `systemd/audiorouter.service` und erwartet einen Launcher
-unter `~/.local/bin/audiorouter-daemon` (siehe `bin/audiorouter-daemon`).
-
+- Linux with PipeWire
+- Python 3.10+
+- GTK 4 / Libadwaita
+- PipeWire & WirePlumber

@@ -1,0 +1,17 @@
+README.md
+pyproject.toml
+audiorouter/__init__.py
+audiorouter/__main__.py
+audiorouter/app.py
+audiorouter/autostart.py
+audiorouter/config.py
+audiorouter/core.py
+audiorouter/daemon.py
+audiorouter/gui.py
+audiorouter/pactl.py
+audiorouter/portal_background.py
+audiorouter.egg-info/PKG-INFO
+audiorouter.egg-info/SOURCES.txt
+audiorouter.egg-info/dependency_links.txt
+audiorouter.egg-info/entry_points.txt
+audiorouter.egg-info/top_level.txt

@@ -1,6 +1,9 @@
 [Desktop Entry]
-Name=audiorouter
-Exec=audiorouter
 Type=Application
-Categories=Audio;Utility;
+Name=AudioRouter
+Comment=Route applications to virtual PipeWire sinks
+Exec=audiorouter
 Icon=de.pasuki.audiorouter
+Terminal=false
+Categories=Audio;Utility;
+StartupNotify=true

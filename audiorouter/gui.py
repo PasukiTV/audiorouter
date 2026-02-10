@@ -6,13 +6,13 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw
 
-from autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
+from . autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
 
 
-from config import load_config, save_config
-import pactl as pa
+from .config import load_config, save_config
+from . import pactl as pa
 # Apply changes immediately (no "Apply" button)
-from audiorouter_core import apply_once
+from .core import apply_once
 
 APP_ID = "de.pasuki.audiorouter"
 
