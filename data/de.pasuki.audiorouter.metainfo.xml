@@ -26,11 +26,10 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>
-        https://raw.githubusercontent.com/pasuki/audiorouter/screenshots/main.png
-      </image>
+      <image>https://raw.githubusercontent.com/PasukiTV/audiorouter/main/screenshots/audiorouter-main.png</image>
     </screenshot>
   </screenshots>
+
 
 
   <launchable type="desktop-id">de.pasuki.audiorouter.desktop</launchable>
