@@ -1,7 +1,0 @@
-Metadata-Version: 2.4
-Name: audiorouter
-Version: 0.1.0
-Summary: Modern Linux audio routing application for PipeWire
-Author: Pasuki
-License-Expression: MIT
-Requires-Python: >=3.10

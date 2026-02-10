@@ -1,2 +1,0 @@
-[console_scripts]
-audiorouter = audiorouter.app:main
