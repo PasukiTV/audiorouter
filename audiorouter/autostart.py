@@ -27,3 +27,4 @@ def disable() -> None:
         AUTOSTART_FILE.unlink()
     except FileNotFoundError:
         pass
+

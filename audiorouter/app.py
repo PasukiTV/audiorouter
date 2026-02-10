@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import sys
-import threading
 
 # Make bundled modules importable inside Flatpak (if you bundle extra libs there)
 LIBDIR = "/app/lib/audiorouter"
@@ -14,19 +13,15 @@ if os.path.isdir(LIBDIR) and LIBDIR not in sys.path:
 def main():
     daemon_mode = ("--daemon" in sys.argv) or ("--background" in sys.argv)
 
-    # NEW: package-relative import
-    from .daemon import run_daemon
+    if daemon_mode:
+        from .daemon import run_daemon
+        run_daemon()
+        return
 
-    t = threading.Thread(target=run_daemon, daemon=False)
-    t.start()
-
-    if not daemon_mode:
-        os.environ.setdefault("GSK_RENDERER", "cairo")
-        # NEW: package-relative import
-        from .gui import main as gui_main
-        gui_main()
-
-    t.join()
+    # GUI mode
+    os.environ.setdefault("GSK_RENDERER", "cairo")
+    from .gui import main as gui_main
+    gui_main()
 
 
 if __name__ == "__main__":
