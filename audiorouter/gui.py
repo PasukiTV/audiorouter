@@ -18,7 +18,7 @@ APP_ID = "de.pasuki.audiorouter"
 
 import re
 
-DONATE_URL = "https://www.paypal.me/PascalSmigielski"
+DONATE_URL = "https://www.paypal.me/audiorouter"
 
 def open_donate(_btn):
     launcher = Gtk.UriLauncher.new(DONATE_URL)
