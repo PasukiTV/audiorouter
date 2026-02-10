@@ -8,7 +8,15 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
 
-  <developer_name>Pasuki</developer_name>
+  <developer id="de.pasuki">
+    <name>Pasuki</name>
+  </developer>
+
+  <content_rating type="oars-1.1" />
+
+  <url type="homepage">https://github.com/PasukiTV/audiorouter</url>
+  <url type="bugtracker">https://github.com/PasukiTV/audiorouter/issues</url>
+
 
   <description>
     <p>
@@ -38,9 +46,4 @@
     <binary>audiorouter</binary>
   </provides>
 
-  <!-- Optional but recommended (fill in when your GitHub repo is public) -->
-  <!--
-  <url type="homepage">https://github.com/pasuki/audiorouter</url>
-  <url type="bugtracker">https://github.com/pasuki/audiorouter/issues</url>
-  -->
 </component>
