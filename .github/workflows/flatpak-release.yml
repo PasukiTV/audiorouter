@@ -1,0 +1,54 @@
+name: Build & Release Flatpak
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Flatpak + flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+
+      - name: Add Flathub remote
+        run: |
+          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Install GNOME SDK/Platform (from manifest)
+        run: |
+          flatpak install -y --noninteractive flathub org.gnome.Sdk//49 org.gnome.Platform//49
+
+      - name: Build Flatpak repo (flatpak-builder)
+        run: |
+          flatpak-builder \
+            --install-deps-from=flathub \
+            --force-clean \
+            --repo=repo \
+            build-dir \
+            flatpak/de.pasuki.audiorouter.yml
+
+      - name: Create .flatpak bundle
+        run: |
+          flatpak build-bundle repo audiorouter.flatpak de.pasuki.audiorouter
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: audiorouter-flatpak
+          path: audiorouter.flatpak
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: audiorouter.flatpak
