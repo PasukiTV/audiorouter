@@ -99,14 +99,14 @@ def load_null_sink(bus_name: str, label: str) -> str:
     return module_id
 
 
-def cleanup_loopbacks_for_route(source_name: str, sink_name: str) -> None:
-    # Entfernt alte Loopbacks, die genau diese Route machen
+def cleanup_loopbacks_for_source(source_name: str) -> None:
     for m in list_modules():
         if m.get("name") != "module-loopback":
             continue
         args = m.get("args", "") or ""
-        if f"source={source_name}" in args and f"sink={sink_name}" in args:
+        if f"source={source_name}" in args:
             unload_module(m["id"])
+
 
 
 
@@ -174,3 +174,18 @@ def list_sink_inputs() -> List[Dict[str, Any]]:
         items.append(cur)
 
     return items
+
+def get_physical_default_sink() -> str:
+    default = get_default_sink()
+
+    # Wenn Default kein vsink ist → ok
+    if default and not default.startswith("vsink."):
+        return default
+
+    # Fallback: ersten echten Hardware-Sink nehmen
+    for s in list_sinks():
+        name = s["name"]
+        if not name.startswith("vsink."):
+            return name
+
+    return default  # letzter fallback

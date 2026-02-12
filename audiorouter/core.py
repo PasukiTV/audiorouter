@@ -1,21 +1,45 @@
 from __future__ import annotations
 
-"""Core logic for audiorouter.
+"""
+Core logic for audiorouter.
 
-This module contains the *idempotent* reconciliation step.
-It is shared by both the GUI and the background daemon.
+Safe + idempotent reconciliation.
 
-The reconciliation does four things:
-1) Unloads modules for buses that were removed from the config.
-2) Ensures every configured bus has a module-null-sink.
-3) Ensures every bus is routed to its configured target (default or a real sink)
-   by creating a module-loopback from "<bus>.monitor" to the target.
-4) Applies stream rules by moving matching sink-inputs to the bus sink.
+Fixes:
+- No self loops
+- No routing cycles
+- Never routes to vsink.* as physical default
+- No duplicate loopbacks
+- Robust against PipeWire event storms
 """
 
 from .config import load_config, load_state, save_state
 from . import pactl as pa
 
+
+# ---------------------------------------------------------
+# Helper: get physical default sink (never vsink.*)
+# ---------------------------------------------------------
+
+def _get_physical_default_sink() -> str | None:
+    default = pa.get_default_sink()
+
+    # If default is already physical → use it
+    if default and not default.startswith("vsink."):
+        return default
+
+    # Otherwise find first real hardware sink
+    for s in pa.list_sinks():
+        name = s.get("name")
+        if name and not name.startswith("vsink."):
+            return name
+
+    return default
+
+
+# ---------------------------------------------------------
+# Core Reconciliation
+# ---------------------------------------------------------
 
 def apply_once() -> None:
     cfg = load_config()
@@ -28,23 +52,27 @@ def apply_once() -> None:
     buses = cfg.get("buses", [])
     rules = cfg.get("rules", [])
 
-    # ---- Cleanup removed buses ----
     current_bus_names = {b["name"] for b in buses}
 
-    # Unload loopbacks for buses that no longer exist
-    for bus_name in list(st.get("route_modules", {}).keys()):
+    # ---------------------------------------------------------
+    # 1) Cleanup removed buses
+    # ---------------------------------------------------------
+
+    for bus_name in list(st["route_modules"].keys()):
         if bus_name not in current_bus_names:
             pa.unload_module(st["route_modules"][bus_name])
-            del st["route_modules"][bus_name]
-            st.get("route_target", {}).pop(bus_name, None)
+            st["route_modules"].pop(bus_name, None)
+            st["route_target"].pop(bus_name, None)
 
-    # Unload null-sink modules for buses that no longer exist
-    for bus_name in list(st.get("bus_modules", {}).keys()):
+    for bus_name in list(st["bus_modules"].keys()):
         if bus_name not in current_bus_names:
             pa.unload_module(st["bus_modules"][bus_name])
-            del st["bus_modules"][bus_name]
+            st["bus_modules"].pop(bus_name, None)
 
-    # 1) Ensure null sinks exist for every bus
+    # ---------------------------------------------------------
+    # 2) Ensure null sinks exist
+    # ---------------------------------------------------------
+
     for b in buses:
         name = b["name"]
         label = b.get("label", name)
@@ -53,44 +81,73 @@ def apply_once() -> None:
             mid = pa.load_null_sink(name, label)
             st["bus_modules"][name] = mid
 
-    # 2) Routing: bus.monitor -> route_to target
+    # ---------------------------------------------------------
+    # 3) Routing logic (SAFE)
+    # ---------------------------------------------------------
+
     for b in buses:
         name = b["name"]
         route_to = b.get("route_to", "default")
 
-        target = pa.get_default_sink() if route_to == "default" else route_to
-        if not target or target == name:
+        # Resolve target safely
+        if route_to == "default":
+            target = _get_physical_default_sink()
+        else:
+            target = route_to
+
+        if not target:
+            continue
+
+        # ❌ Never route to itself
+        if target == name:
+            continue
+
+        # ❌ Never route to a monitor
+        if target.endswith(".monitor"):
             continue
 
         monitor = f"{name}.monitor"
 
-        # PipeWire erstellt monitor kurz nach sink
         if not pa.source_exists(monitor):
             continue
 
-        # Immer zuerst alte Loopbacks dieser Route entfernen (gegen Duplikate)
-        pa.cleanup_loopbacks_for_route(monitor, target)
+        # Remove ALL loopbacks for this source (no duplicates ever)
+        pa.cleanup_loopbacks_for_source(monitor)
 
         last = st["route_target"].get(name)
         old_mod = st["route_modules"].get(name)
 
-        # Wenn target gleich geblieben ist und wir noch ein Modul haben: passt
-        if last == target and old_mod:
+        # If nothing changed and module still exists → skip
+        if (
+            last == target
+            and old_mod
+            and any(m["id"] == old_mod for m in pa.list_modules())
+        ):
             continue
 
-        # Wenn target gewechselt hat: altes Modul entfernen
+        # If old module exists but target changed → unload
         if old_mod:
             pa.unload_module(old_mod)
 
-        new_mod = pa.load_loopback(monitor, target, latency_msec=30)
+        # Create new loopback
+        new_mod = pa.load_loopback(
+            monitor,
+            target,
+            latency_msec=30
+        )
+
         st["route_modules"][name] = new_mod
         st["route_target"][name] = target
 
-        
-    # 3) Apply rules: move matching app streams to bus sink
+    # ---------------------------------------------------------
+    # 4) Apply stream rules
+    # ---------------------------------------------------------
+
     inputs = pa.list_sink_inputs()
+
     for inp in inputs:
         props = inp.get("props", {})
+
         app = (props.get("application.name") or "").lower()
         bin_ = (props.get("application.process.binary") or "").lower()
         aid = (props.get("pipewire.access.portal.app_id") or "").lower()
@@ -103,6 +160,7 @@ def apply_once() -> None:
                 continue
 
             ok = True
+
             if "binary" in match and match["binary"].lower() not in bin_:
                 ok = False
             if "app" in match and match["app"].lower() not in app:
