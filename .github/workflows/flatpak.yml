@@ -1,4 +1,4 @@
-name: Build & Release Flatpak
+name: Build Flatpak
 
 on:
   push:
@@ -47,22 +47,7 @@ jobs:
           name: audiorouter-flatpak
           path: audiorouter.flatpak
 
-      # Creates the GitHub Release automatically for the tag (if not existing)
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          generate_release_notes: true
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Upload the Flatpak as a release asset
-      - name: Attach Flatpak to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Attach to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: audiorouter.flatpak
