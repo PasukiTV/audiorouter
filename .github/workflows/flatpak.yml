@@ -1,0 +1,34 @@
+name: Build Flatpak
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Flatpak
+        run: |
+          sudo apt update
+          sudo apt install -y flatpak flatpak-builder
+          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Build Flatpak
+        run: |
+          flatpak-builder --install-deps-from=flathub --force-clean build-dir flatpak/de.pasuki.audiorouter.yml
+
+      - name: Create bundle
+        run: |
+          flatpak build-bundle build-dir audiorouter.flatpak de.pasuki.audiorouter
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: audiorouter-flatpak
+          path: audiorouter.flatpak
