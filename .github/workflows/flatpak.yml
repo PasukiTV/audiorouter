@@ -4,28 +4,39 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Flatpak
+      - name: Install Flatpak + flatpak-builder
         run: |
-          sudo apt update
-          sudo apt install -y flatpak flatpak-builder
-          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
 
-      - name: Build Flatpak
+      - name: Add Flathub remote (USER)
         run: |
-          flatpak-builder --install-deps-from=flathub --force-clean build-dir flatpak/de.pasuki.audiorouter.yml
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak remotes --user
+
+      - name: Build Flatpak repo
+        run: |
+          rm -rf repo build-dir .flatpak-builder
+          flatpak-builder --user \
+            --install-deps-from=flathub \
+            --repo=repo \
+            --force-clean \
+            build-dir flatpak/de.pasuki.audiorouter.yml
 
       - name: Create bundle
         run: |
-          flatpak build-bundle build-dir audiorouter.flatpak de.pasuki.audiorouter
+          flatpak build-bundle repo audiorouter.flatpak de.pasuki.audiorouter
+          ls -lh audiorouter.flatpak
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
