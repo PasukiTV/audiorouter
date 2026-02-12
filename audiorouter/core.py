@@ -6,20 +6,15 @@ Core logic for audiorouter.
 Safe + idempotent reconciliation.
 
 Fixes:
-- No self loops
-- No routing cycles
 - Never routes to vsink.* as physical default
-- No duplicate loopbacks
-- Robust against PipeWire event storms
+- No self loops
+- No duplicate loopbacks (no create/delete loop)
+- Only removes wrong loopbacks (same source, different sink)
 """
 
 from .config import load_config, load_state, save_state
 from . import pactl as pa
 
-
-# ---------------------------------------------------------
-# Helper: get physical default sink (never vsink.*)
-# ---------------------------------------------------------
 
 def _get_physical_default_sink() -> str | None:
     default = pa.get_default_sink()
@@ -37,16 +32,12 @@ def _get_physical_default_sink() -> str | None:
     return default
 
 
-# ---------------------------------------------------------
-# Core Reconciliation
-# ---------------------------------------------------------
-
 def apply_once() -> None:
     cfg = load_config()
     st = load_state()
 
     st.setdefault("bus_modules", {})     # bus_name -> module_id (null-sink)
-    st.setdefault("route_modules", {})   # bus_name -> module_id (loopback)
+    st.setdefault("route_modules", {})   # bus_name -> module_id (loopback) (optional)
     st.setdefault("route_target", {})    # bus_name -> last target sink
 
     buses = cfg.get("buses", [])
@@ -57,7 +48,6 @@ def apply_once() -> None:
     # ---------------------------------------------------------
     # 1) Cleanup removed buses
     # ---------------------------------------------------------
-
     for bus_name in list(st["route_modules"].keys()):
         if bus_name not in current_bus_names:
             pa.unload_module(st["route_modules"][bus_name])
@@ -72,7 +62,6 @@ def apply_once() -> None:
     # ---------------------------------------------------------
     # 2) Ensure null sinks exist
     # ---------------------------------------------------------
-
     for b in buses:
         name = b["name"]
         label = b.get("label", name)
@@ -82,72 +71,51 @@ def apply_once() -> None:
             st["bus_modules"][name] = mid
 
     # ---------------------------------------------------------
-    # 3) Routing logic (SAFE)
+    # 3) Routing logic (NO LOOPBACK CHURN)
     # ---------------------------------------------------------
+    bus_names = {b["name"] for b in buses}
 
     for b in buses:
         name = b["name"]
         route_to = b.get("route_to", "default")
 
         # Resolve target safely
-        if route_to == "default":
-            target = _get_physical_default_sink()
-        else:
-            target = route_to
-
+        target = _get_physical_default_sink() if route_to == "default" else route_to
         if not target:
             continue
 
-        # ❌ Never route to itself
-        if target == name:
-            continue
-
-        # ❌ Never route to a monitor
-        if target.endswith(".monitor"):
+        # Never route to itself / monitors
+        if target == name or target.endswith(".monitor"):
             continue
 
         monitor = f"{name}.monitor"
 
+        # PipeWire may create monitor shortly after sink
         if not pa.source_exists(monitor):
             continue
 
-        # Remove ALL loopbacks for this source (no duplicates ever)
-        pa.cleanup_loopbacks_for_source(monitor)
-
-        last = st["route_target"].get(name)
-        old_mod = st["route_modules"].get(name)
-
-        # If nothing changed and module still exists → skip
-        if (
-            last == target
-            and old_mod
-            and any(m["id"] == old_mod for m in pa.list_modules())
-        ):
+        # ✅ If correct loopback already exists: keep it, do nothing
+        if pa.loopback_exists(monitor, target):
+            st["route_target"][name] = target
+            # Optional: remove wrong ones (same source -> other sink)
+            pa.cleanup_wrong_loopbacks_for_source(monitor, target)
             continue
 
-        # If old module exists but target changed → unload
-        if old_mod:
-            pa.unload_module(old_mod)
+        # Remove only WRONG loopbacks (same source, different sink)
+        pa.cleanup_wrong_loopbacks_for_source(monitor, target)
 
-        # Create new loopback
-        new_mod = pa.load_loopback(
-            monitor,
-            target,
-            latency_msec=30
-        )
-
+        # Create loopback
+        new_mod = pa.load_loopback(monitor, target, latency_msec=30)
         st["route_modules"][name] = new_mod
         st["route_target"][name] = target
 
     # ---------------------------------------------------------
     # 4) Apply stream rules
     # ---------------------------------------------------------
-
     inputs = pa.list_sink_inputs()
 
     for inp in inputs:
         props = inp.get("props", {})
-
         app = (props.get("application.name") or "").lower()
         bin_ = (props.get("application.process.binary") or "").lower()
         aid = (props.get("pipewire.access.portal.app_id") or "").lower()
@@ -160,7 +128,6 @@ def apply_once() -> None:
                 continue
 
             ok = True
-
             if "binary" in match and match["binary"].lower() not in bin_:
                 ok = False
             if "app" in match and match["app"].lower() not in app:

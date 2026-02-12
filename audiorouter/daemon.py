@@ -136,7 +136,7 @@ def run_daemon():
                 last = 0.0
 
                 # instead of "all": only what we need
-                pulse.event_mask_set("sink_input", "sink", "server")
+                pulse.event_mask_set("sink_input")
 
                 def cb(_ev):
                     nonlocal last

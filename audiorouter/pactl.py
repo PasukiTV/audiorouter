@@ -99,13 +99,28 @@ def load_null_sink(bus_name: str, label: str) -> str:
     return module_id
 
 
-def cleanup_loopbacks_for_source(source_name: str) -> None:
+def loopback_exists(source_name: str, sink_name: str) -> bool:
     for m in list_modules():
         if m.get("name") != "module-loopback":
             continue
         args = m.get("args", "") or ""
-        if f"source={source_name}" in args:
+        if f"source={source_name}" in args and f"sink={sink_name}" in args:
+            return True
+    return False
+
+
+def cleanup_wrong_loopbacks_for_source(source_name: str, wanted_sink: str) -> None:
+    """
+    Entfernt nur Loopbacks, die von source_name kommen, aber NICHT auf wanted_sink zeigen.
+    Lässt das korrekte Loopback in Ruhe (wichtig gegen Create/Delete-Schleifen).
+    """
+    for m in list_modules():
+        if m.get("name") != "module-loopback":
+            continue
+        args = m.get("args", "") or ""
+        if f"source={source_name}" in args and f"sink={wanted_sink}" not in args:
             unload_module(m["id"])
+
 
 
 
