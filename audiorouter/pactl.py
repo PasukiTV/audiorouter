@@ -108,6 +108,15 @@ def source_exists(name: str) -> bool:
 def set_source_mute(source_name: str, muted: bool) -> None:
     try_pactl("set-source-mute", source_name, "1" if muted else "0")
 
+
+def set_sink_mute(sink_name: str, muted: bool) -> None:
+    try_pactl("set-sink-mute", sink_name, "1" if muted else "0")
+
+
+def set_sink_input_mute(sink_input_id: str, muted: bool) -> None:
+    try_pactl("set-sink-input-mute", sink_input_id, "1" if muted else "0")
+
+
 def unload_module(module_id: str) -> None:
     if module_id:
         try_pactl("unload-module", module_id)
@@ -227,6 +236,12 @@ def list_sink_inputs() -> List[Dict[str, Any]]:
             cur["sink_id"] = line.split(":", 1)[1].strip()
             continue
 
+        if line.startswith("Owner Module:") or line.startswith("Besitzer-Modul:"):
+            owner = line.split(":", 1)[1].strip()
+            if owner not in ("n/a", "k. A."):
+                cur["owner_module"] = owner
+            continue
+
         if in_props and "=" in line:
             k, v = line.split("=", 1)
             cur["props"][k.strip()] = v.strip().strip('"')
@@ -235,6 +250,16 @@ def list_sink_inputs() -> List[Dict[str, Any]]:
         items.append(cur)
 
     return items
+
+def sink_inputs_for_owner_module(module_id: str) -> List[str]:
+    if not module_id:
+        return []
+    return [
+        str(i.get("id", ""))
+        for i in list_sink_inputs()
+        if str(i.get("owner_module", "")) == str(module_id)
+    ]
+
 
 def get_physical_default_sink() -> str:
     default = get_default_sink()

@@ -15,7 +15,7 @@ Fixes:
 - No self loops
 - No duplicate loopbacks (no create/delete loop)
 - Only removes wrong loopbacks (same source, different sink)
-- Route handover uses longer mute windows for clean virtual/physical switching
+- Route handover mutes bus sink + loopback sink-input to reduce switch artifacts
 """
 
 from .config import load_config, load_state, save_state
@@ -106,10 +106,18 @@ def apply_once() -> None:
             continue
 
         prev_target = st["route_target"].get(name, "")
+        prev_mod = str(st["route_modules"].get(name, "") or "")
         involves_virtual = target.startswith("vsink.") or str(prev_target).startswith("vsink.")
 
-        # Reduce audible artifacts during route handover by muting the monitor source.
+        # Mute the bus sink itself (not only the monitor source) to avoid audible pops
+        # while loopback modules are recreated. Also mute sink-inputs owned by the old
+        # loopback module when we can resolve them.
+        prev_inputs = pa.sink_inputs_for_owner_module(prev_mod)
+        pa.set_sink_mute(name, True)
         pa.set_source_mute(monitor, True)
+        for sid in prev_inputs:
+            pa.set_sink_input_mute(sid, True)
+
         try:
             if involves_virtual:
                 # For virtual-bus handover use break-before-make while muted to avoid
@@ -125,6 +133,7 @@ def apply_once() -> None:
                 time.sleep(PHYSICAL_SWITCH_MUTE_SEC)
         finally:
             pa.set_source_mute(monitor, False)
+            pa.set_sink_mute(name, False)
 
         st["route_modules"][name] = new_mod
         st["route_target"][name] = target
