@@ -10,7 +10,7 @@ Fixes:
 - No self loops
 - No duplicate loopbacks (no create/delete loop)
 - Only removes wrong loopbacks (same source, different sink)
-- Route switch is create-first, cleanup-second to reduce audible pops
+- Route switch strategy avoids parallel virtual-bus handover noise
 """
 
 from .config import load_config, load_state, save_state
@@ -100,12 +100,18 @@ def apply_once() -> None:
             pa.cleanup_wrong_loopbacks_for_source(monitor, target)
             continue
 
-        # Create-first strategy: create the new loopback before removing old wrong ones.
-        # This reduces hard audio cutovers and lowers audible switching artifacts.
-        new_mod = pa.load_loopback(monitor, target, latency_msec=60)
+        prev_target = st["route_target"].get(name, "")
+        involves_virtual = target.startswith("vsink.") or str(prev_target).startswith("vsink.")
 
-        # Remove only WRONG loopbacks (same source, different sink)
-        pa.cleanup_wrong_loopbacks_for_source(monitor, target)
+        if involves_virtual:
+            # For virtual-bus handover, avoid temporary parallel paths that can cause
+            # feedback/comb-noise while switching between vsinks.
+            pa.cleanup_wrong_loopbacks_for_source(monitor, target)
+            new_mod = pa.load_loopback(monitor, target, latency_msec=30)
+        else:
+            # For physical outputs, create first then cleanup to reduce hard cutover pops.
+            new_mod = pa.load_loopback(monitor, target, latency_msec=30)
+            pa.cleanup_wrong_loopbacks_for_source(monitor, target)
 
         st["route_modules"][name] = new_mod
         st["route_target"][name] = target
