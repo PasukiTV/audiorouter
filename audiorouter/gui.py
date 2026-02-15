@@ -299,16 +299,19 @@ class MainWindow(Adw.ApplicationWindow):
             row.set_child(box)
 
             name_lbl = Gtk.Label(label=b["name"], xalign=0)
-            name_lbl.set_hexpand(True)
+            name_lbl.set_width_chars(20)
+            name_lbl.set_max_width_chars(20)
             name_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-            name_lbl.set_max_width_chars(28)
             box.append(name_lbl)
 
             label_lbl = Gtk.Label(label=b.get("label", ""), xalign=0)
-            label_lbl.set_width_chars(12)
+            label_lbl.set_width_chars(10)
+            label_lbl.set_max_width_chars(12)
+            label_lbl.set_ellipsize(Pango.EllipsizeMode.END)
             box.append(label_lbl)
 
             dd = Gtk.DropDown.new_from_strings(sink_labels)
+            dd.set_hexpand(True)
             route_to = b.get("route_to", "default")
             idx = 0
             for i, (val, _) in enumerate(sink_items):
