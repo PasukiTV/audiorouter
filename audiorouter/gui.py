@@ -179,10 +179,13 @@ class MainWindow(Adw.ApplicationWindow):
         hdr_stream.set_hexpand(True)
         hdr_stream.add_css_class("dim-label")
         hdr_target = Gtk.Label(label="Target bus", xalign=0)
+        hdr_target.set_width_chars(16)
         hdr_target.add_css_class("dim-label")
         hdr_move = Gtk.Label(label="Move", xalign=0)
+        hdr_move.set_width_chars(10)
         hdr_move.add_css_class("dim-label")
         hdr_rule = Gtk.Label(label="Rule", xalign=0)
+        hdr_rule.set_width_chars(10)
         hdr_rule.add_css_class("dim-label")
         streams_header.append(hdr_stream)
         streams_header.append(hdr_target)
@@ -441,6 +444,7 @@ class MainWindow(Adw.ApplicationWindow):
 
             if buses:
                 dd = Gtk.DropDown.new_from_strings(buses)
+                dd.set_size_request(170, -1)
 
                 # Prefer: actual current sink of this stream (sink_id)
                 cur_sink_id = str(inp.get("sink_id", ""))
@@ -463,6 +467,7 @@ class MainWindow(Adw.ApplicationWindow):
                     self.refresh_all()
 
                 btn_move = Gtk.Button(label="Move to Bus")
+                btn_move.set_size_request(110, -1)
                 btn_move.connect("clicked", on_move)
                 box.append(dd)
                 box.append(btn_move)
@@ -479,6 +484,7 @@ class MainWindow(Adw.ApplicationWindow):
                         dd.set_selected(buses.index(target_bus))
 
                 btn_rule = Gtk.Button(label=("Delete Rule" if has_rule else "Add Rule"))
+                btn_rule.set_size_request(110, -1)
                 if has_rule:
                     btn_rule.add_css_class("suggested-action")  # visually highlight
 
