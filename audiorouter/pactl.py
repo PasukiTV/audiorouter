@@ -85,6 +85,11 @@ def sink_exists(name: str) -> bool:
 def source_exists(name: str) -> bool:
     return any(s["name"] == name for s in list_sources())
 
+
+
+def set_source_mute(source_name: str, muted: bool) -> None:
+    try_pactl("set-source-mute", source_name, "1" if muted else "0")
+
 def unload_module(module_id: str) -> None:
     if module_id:
         try_pactl("unload-module", module_id)

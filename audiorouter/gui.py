@@ -7,7 +7,7 @@ from pathlib import Path
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw
+from gi.repository import Gtk, Adw, Pango
 
 from .autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
 
@@ -65,7 +65,8 @@ class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application):
         super().__init__(application=app)
         self.set_title("audiorouter")
-        self.set_default_size(980, 620)
+        self.set_default_size(1180, 720)
+        self.set_size_request(980, 620)
 
         self.cfg = load_config()
 
@@ -98,11 +99,14 @@ class MainWindow(Adw.ApplicationWindow):
         root.append(file_buttons)
 
         # Lightweight status row (updates only on refresh)
-        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.status_pipewire = Gtk.Label(xalign=0)
         self.status_default_sink = Gtk.Label(xalign=0)
         self.status_daemon = Gtk.Label(xalign=0)
         self.status_streams = Gtk.Label(xalign=0)
+        for lbl in (self.status_pipewire, self.status_default_sink, self.status_daemon, self.status_streams):
+            lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            lbl.set_max_width_chars(42)
         status_row.append(self.status_pipewire)
         status_row.append(self.status_default_sink)
         status_row.append(self.status_daemon)
@@ -114,10 +118,15 @@ class MainWindow(Adw.ApplicationWindow):
         header.pack_end(btn_refresh)
 
         split = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
+        split.set_position(560)
+        split.set_resize_start_child(True)
+        split.set_shrink_start_child(False)
+        split.set_shrink_end_child(False)
         root.append(split)
 
         # LEFT: buses
         left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        left.set_size_request(500, -1)
         split.set_start_child(left)
 
         left_title = Gtk.Label(label="Buses (virtual sinks)", xalign=0)
@@ -291,6 +300,8 @@ class MainWindow(Adw.ApplicationWindow):
 
             name_lbl = Gtk.Label(label=b["name"], xalign=0)
             name_lbl.set_hexpand(True)
+            name_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            name_lbl.set_max_width_chars(28)
             box.append(name_lbl)
 
             label_lbl = Gtk.Label(label=b.get("label", ""), xalign=0)
