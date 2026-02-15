@@ -173,6 +173,23 @@ class MainWindow(Adw.ApplicationWindow):
         right_title.add_css_class("title-3")
         right.append(right_title)
 
+        streams_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
+                                 margin_top=2, margin_bottom=2, margin_start=6, margin_end=6)
+        hdr_stream = Gtk.Label(label="Stream", xalign=0)
+        hdr_stream.set_hexpand(True)
+        hdr_stream.add_css_class("dim-label")
+        hdr_target = Gtk.Label(label="Target bus", xalign=0)
+        hdr_target.add_css_class("dim-label")
+        hdr_move = Gtk.Label(label="Move", xalign=0)
+        hdr_move.add_css_class("dim-label")
+        hdr_rule = Gtk.Label(label="Rule", xalign=0)
+        hdr_rule.add_css_class("dim-label")
+        streams_header.append(hdr_stream)
+        streams_header.append(hdr_target)
+        streams_header.append(hdr_move)
+        streams_header.append(hdr_rule)
+        right.append(streams_header)
+
         self.stream_list = Gtk.ListBox()
         self.stream_list.set_selection_mode(Gtk.SelectionMode.NONE)
         right.append(self.stream_list)
