@@ -3,11 +3,11 @@ from __future__ import annotations
 import atexit
 import os
 import signal
-import subprocess
 import time
 from pathlib import Path
 
 from .core import apply_once
+from . import pactl as pa
 
 _STOP = False
 
@@ -93,12 +93,8 @@ def _try_acquire_daemon_lock() -> bool:
 def wait_for_pipewire(timeout: float = 15.0) -> bool:
     start = time.monotonic()
     while time.monotonic() - start < timeout and not _STOP:
-        rc = subprocess.call(
-            ["pactl", "info"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        if rc == 0:
+        # Use shared pactl wrapper so Flatpak runs this via flatpak-spawn --host.
+        if pa.try_pactl("info"):
             return True
         time.sleep(0.5)
     return False

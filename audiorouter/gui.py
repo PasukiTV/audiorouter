@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw
 
-from . autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
+from .autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
 
 
 from .config import load_config, save_config
@@ -49,6 +52,14 @@ def friendly_sink_list():
     return items
 
 
+def is_internal_loopback(inp: dict) -> bool:
+    props = inp.get("props", {})
+    media = (props.get("media.name") or "").lower()
+    nodeg = (props.get("node.group") or "").lower()
+    noden = (props.get("node.name") or "").lower()
+    return ("loopback" in media) or ("loopback" in nodeg) or (".loopback" in noden)
+
+
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application):
         super().__init__(application=app)
@@ -76,6 +87,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.autostart_check.connect("toggled", self.on_autostart_toggled)
         root.append(self.autostart_check)
 
+        # Lightweight status row (updates only on refresh)
+        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        self.status_pipewire = Gtk.Label(xalign=0)
+        self.status_default_sink = Gtk.Label(xalign=0)
+        self.status_daemon = Gtk.Label(xalign=0)
+        self.status_streams = Gtk.Label(xalign=0)
+        status_row.append(self.status_pipewire)
+        status_row.append(self.status_default_sink)
+        status_row.append(self.status_daemon)
+        status_row.append(self.status_streams)
+        root.append(status_row)
 
         btn_refresh = Gtk.Button(label="Refresh")
         btn_refresh.connect("clicked", lambda *_: self.refresh_all())
@@ -125,7 +147,8 @@ class MainWindow(Adw.ApplicationWindow):
     def refresh_all(self):
         self.cfg = load_config()
         self.refresh_buses()
-        self.refresh_streams()
+        stream_count = self.refresh_streams()
+        self.refresh_status(stream_count)
 
     def on_autostart_toggled(self, btn: Gtk.CheckButton):
         state = btn.get_active()
@@ -138,6 +161,43 @@ class MainWindow(Adw.ApplicationWindow):
             print("-> disable()")
             autostart_disable()
 
+
+    def _is_pid_alive(self, pid: int) -> bool:
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+
+    def _daemon_running(self) -> bool:
+        lock_file = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "audiorouter-daemon.lock"
+        if not lock_file.exists():
+            return False
+        try:
+            pid = int(lock_file.read_text(encoding="utf-8").strip())
+        except Exception:
+            return False
+        return self._is_pid_alive(pid)
+
+    def refresh_status(self, stream_count: int):
+        info = pa.try_pactl("info")
+        pipewire_ok = bool(info.strip())
+
+        if pipewire_ok:
+            default_sink = pa.get_default_sink() or "-"
+            sink_count = len(pa.list_sinks())
+            self.status_pipewire.set_text(f"PipeWire/Pulse: ✅ bereit ({sink_count} Sinks)")
+            self.status_default_sink.set_text(f"Default Sink: {default_sink}")
+        else:
+            self.status_pipewire.set_text("PipeWire/Pulse: ❌ nicht erreichbar")
+            self.status_default_sink.set_text("Default Sink: -")
+
+        self.status_daemon.set_text(f"Daemon: {'✅ läuft' if self._daemon_running() else '⚠️ gestoppt'}")
+        self.status_streams.set_text(f"Aktive Streams: {stream_count}")
 
     def refresh_buses(self):
         for child in list(self.bus_list):
@@ -218,22 +278,12 @@ class MainWindow(Adw.ApplicationWindow):
 
         inputs = pa.list_sink_inputs()
 
-        def is_internal_loopback(inp):
-            props = inp.get("props", {})
-            media = (props.get("media.name") or "").lower()
-            nodeg = (props.get("node.group") or "").lower()
-            noden = (props.get("node.name") or "").lower()
-            return ("loopback" in media) or ("loopback" in nodeg) or (".loopback" in noden)
-
         # Filter loopbacks (routing internals)
         filtered = []
         for i in inputs:
             props = i.get("props", {})
-            if not props:
+            if not props or not is_internal_loopback(i):
                 filtered.append(i)
-            else:
-                if not is_internal_loopback(i):
-                    filtered.append(i)
         inputs = filtered
 
         if not inputs:
@@ -246,9 +296,10 @@ class MainWindow(Adw.ApplicationWindow):
                 xalign=0
             ))
             self.stream_list.append(row)
-            return
+            return 0
 
         buses = [b["name"] for b in self.cfg.get("buses", [])]
+        rules = self.cfg.get("rules", [])
 
         # Map sink_id -> sink_name
         sink_id_to_name = {s["id"]: s["name"] for s in pa.list_sinks()}
@@ -293,17 +344,14 @@ class MainWindow(Adw.ApplicationWindow):
                         pa.move_sink_input(sink_input_id, tgt)
                     except Exception:
                         pass
-                    self.refresh_streams()
+                    self.refresh_all()
 
                 btn_move = Gtk.Button(label="Move to Bus")
                 btn_move.connect("clicked", on_move)
                 box.append(dd)
                 box.append(btn_move)
 
-                                # --- Rule UI (Add / Delete toggle) ---
-                cfg_now = load_config()
-                rules = cfg_now.get("rules", [])
-
+                # --- Rule UI (Add / Delete toggle) ---
                 match = self._stream_match_obj(app, binary, app_id)
                 rule_idx = self._find_rule_index(rules, match) if match else -1
                 has_rule = rule_idx >= 0
@@ -345,6 +393,8 @@ class MainWindow(Adw.ApplicationWindow):
 
 
             self.stream_list.append(row)
+
+        return len(inputs)
 
     def add_bus(self):
         label = self.entry_bus_label.get_text().strip()
