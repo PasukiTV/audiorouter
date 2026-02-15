@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Pango
+from gi.repository import Gtk, Adw, Pango, GLib
 
 from .autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
 
@@ -71,6 +72,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_size_request(980, 620)
 
         self.cfg = load_config()
+        self._apply_running = False
+        self._apply_queued = False
+        self._apply_refresh_requested = False
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
                        margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
@@ -616,13 +620,43 @@ class MainWindow(Adw.ApplicationWindow):
         apply_once()
         self.refresh_all()
 
+    def _apply_once_async(self, refresh_ui: bool = True):
+        # Keep route changes responsive: run potentially slow apply_once() off the GTK main thread.
+        self._apply_refresh_requested = self._apply_refresh_requested or refresh_ui
+        if self._apply_running:
+            self._apply_queued = True
+            return
+
+        self._apply_running = True
+
+        def worker():
+            try:
+                apply_once()
+            finally:
+                def on_done():
+                    self._apply_running = False
+                    do_refresh = self._apply_refresh_requested
+                    self._apply_refresh_requested = False
+                    run_again = self._apply_queued
+                    self._apply_queued = False
+
+                    if do_refresh:
+                        self.refresh_all()
+                    if run_again:
+                        self._apply_once_async(refresh_ui=True)
+                    return False
+
+                GLib.idle_add(on_done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def set_route(self, bus_name: str, route_to: str):
         cfg = load_config()
         for b in cfg.get("buses", []):
             if b["name"] == bus_name:
                 b["route_to"] = route_to
         save_config(cfg)
-        apply_once()
+        self._apply_once_async(refresh_ui=False)
 
 
 class App(Adw.Application):
