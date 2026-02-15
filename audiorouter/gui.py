@@ -76,6 +76,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_queued = False
         self._apply_refresh_requested = False
 
+        self.stream_target_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        self.stream_move_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        self.stream_rule_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
                        margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
         self.set_content(root)
@@ -190,17 +194,17 @@ class MainWindow(Adw.ApplicationWindow):
         hdr_stream.set_hexpand(True)
         hdr_stream.add_css_class("dim-label")
         hdr_target = Gtk.Label(label="Target bus", xalign=0)
-        hdr_target.set_size_request(170, -1)
         hdr_target.set_halign(Gtk.Align.START)
         hdr_target.add_css_class("dim-label")
+        self.stream_target_group.add_widget(hdr_target)
         hdr_move = Gtk.Label(label="Move", xalign=0)
-        hdr_move.set_size_request(110, -1)
         hdr_move.set_halign(Gtk.Align.START)
         hdr_move.add_css_class("dim-label")
+        self.stream_move_group.add_widget(hdr_move)
         hdr_rule = Gtk.Label(label="Rule", xalign=0)
-        hdr_rule.set_size_request(110, -1)
         hdr_rule.set_halign(Gtk.Align.START)
         hdr_rule.add_css_class("dim-label")
+        self.stream_rule_group.add_widget(hdr_rule)
         streams_header.append(hdr_stream)
         streams_header.append(hdr_target)
         streams_header.append(hdr_move)
@@ -519,6 +523,7 @@ class MainWindow(Adw.ApplicationWindow):
             if buses:
                 dd = Gtk.DropDown.new_from_strings(buses)
                 dd.set_size_request(170, -1)
+                self.stream_target_group.add_widget(dd)
 
                 # Prefer: actual current sink of this stream (sink_id)
                 cur_sink_id = str(inp.get("sink_id", ""))
@@ -542,6 +547,7 @@ class MainWindow(Adw.ApplicationWindow):
 
                 btn_move = Gtk.Button(label="Move to Bus")
                 btn_move.set_size_request(110, -1)
+                self.stream_move_group.add_widget(btn_move)
                 btn_move.connect("clicked", on_move)
                 box.append(dd)
                 box.append(btn_move)
@@ -559,6 +565,7 @@ class MainWindow(Adw.ApplicationWindow):
 
                 btn_rule = Gtk.Button(label=("Delete Rule" if has_rule else "Add Rule"))
                 btn_rule.set_size_request(110, -1)
+                self.stream_rule_group.add_widget(btn_rule)
                 if has_rule:
                     btn_rule.add_css_class("suggested-action")  # visually highlight
 
