@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import time
 
+VIRTUAL_SWITCH_MUTE_SEC = 0.12
+PHYSICAL_SWITCH_MUTE_SEC = 0.05
+
 """
 Core logic for audiorouter.
 
@@ -12,7 +15,7 @@ Fixes:
 - No self loops
 - No duplicate loopbacks (no create/delete loop)
 - Only removes wrong loopbacks (same source, different sink)
-- Route handover briefly mutes monitor source to reduce switching noise
+- Route handover uses longer mute windows for clean virtual/physical switching
 """
 
 from .config import load_config, load_state, save_state
@@ -105,21 +108,22 @@ def apply_once() -> None:
         prev_target = st["route_target"].get(name, "")
         involves_virtual = target.startswith("vsink.") or str(prev_target).startswith("vsink.")
 
-        # Reduce audible artifacts during route handover by briefly muting the monitor source.
+        # Reduce audible artifacts during route handover by muting the monitor source.
         pa.set_source_mute(monitor, True)
         try:
             if involves_virtual:
-                # For virtual-bus handover, avoid temporary parallel paths that can cause
-                # feedback/comb-noise while switching between vsinks.
+                # For virtual-bus handover use break-before-make while muted to avoid
+                # comb/feedback-like artifacts when jumping between vsinks.
                 pa.cleanup_wrong_loopbacks_for_source(monitor, target)
+                time.sleep(0.02)
                 new_mod = pa.load_loopback(monitor, target, latency_msec=30)
+                time.sleep(VIRTUAL_SWITCH_MUTE_SEC)
             else:
-                # For physical outputs, create first then cleanup to reduce hard cutover pops.
+                # For physical outputs keep make-before-break and a shorter mute window.
                 new_mod = pa.load_loopback(monitor, target, latency_msec=30)
                 pa.cleanup_wrong_loopbacks_for_source(monitor, target)
+                time.sleep(PHYSICAL_SWITCH_MUTE_SEC)
         finally:
-            # Give PipeWire a brief settle window before unmuting.
-            time.sleep(0.03)
             pa.set_source_mute(monitor, False)
 
         st["route_modules"][name] = new_mod
