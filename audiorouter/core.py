@@ -10,6 +10,7 @@ Fixes:
 - No self loops
 - No duplicate loopbacks (no create/delete loop)
 - Only removes wrong loopbacks (same source, different sink)
+- Route switch is create-first, cleanup-second to reduce audible pops
 """
 
 from .config import load_config, load_state, save_state
@@ -73,8 +74,6 @@ def apply_once() -> None:
     # ---------------------------------------------------------
     # 3) Routing logic (NO LOOPBACK CHURN)
     # ---------------------------------------------------------
-    bus_names = {b["name"] for b in buses}
-
     for b in buses:
         name = b["name"]
         route_to = b.get("route_to", "default")
@@ -101,11 +100,13 @@ def apply_once() -> None:
             pa.cleanup_wrong_loopbacks_for_source(monitor, target)
             continue
 
+        # Create-first strategy: create the new loopback before removing old wrong ones.
+        # This reduces hard audio cutovers and lowers audible switching artifacts.
+        new_mod = pa.load_loopback(monitor, target, latency_msec=60)
+
         # Remove only WRONG loopbacks (same source, different sink)
         pa.cleanup_wrong_loopbacks_for_source(monitor, target)
 
-        # Create loopback
-        new_mod = pa.load_loopback(monitor, target, latency_msec=30)
         st["route_modules"][name] = new_mod
         st["route_target"][name] = target
 
