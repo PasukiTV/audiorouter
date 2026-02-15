@@ -24,10 +24,6 @@ import re
 DONATE_URL = "https://www.paypal.me/audiorouter"
 
 
-def open_local_file(path: Path):
-    launcher = Gtk.UriLauncher.new(path.expanduser().resolve().as_uri())
-    launcher.launch(None)
-
 def open_donate(_btn):
     launcher = Gtk.UriLauncher.new(DONATE_URL)
     launcher.launch(None)
@@ -94,9 +90,9 @@ class MainWindow(Adw.ApplicationWindow):
 
         file_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         btn_open_rules = Gtk.Button(label="Open Routing Rules")
-        btn_open_rules.connect("clicked", lambda *_: open_local_file(RULES_PATH))
+        btn_open_rules.connect("clicked", lambda *_: self.open_json_editor(RULES_PATH, "Routing Rules"))
         btn_open_vsinks = Gtk.Button(label="Open vSinks")
-        btn_open_vsinks.connect("clicked", lambda *_: open_local_file(VSINKS_PATH))
+        btn_open_vsinks.connect("clicked", lambda *_: self.open_json_editor(VSINKS_PATH, "vSinks"))
         file_buttons.append(btn_open_rules)
         file_buttons.append(btn_open_vsinks)
         root.append(file_buttons)
@@ -158,6 +154,61 @@ class MainWindow(Adw.ApplicationWindow):
         self.refresh_all()
 
 
+    def open_json_editor(self, path: Path, title: str):
+        # Ensure config files exist and are synced before opening editor.
+        load_config()
+
+        editor = Gtk.Window(title=f"{title} bearbeiten")
+        editor.set_transient_for(self)
+        editor.set_modal(True)
+        editor.set_default_size(780, 520)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                       margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+        editor.set_child(root)
+
+        root.append(Gtk.Label(label=str(path), xalign=0))
+
+        sw = Gtk.ScrolledWindow()
+        sw.set_vexpand(True)
+        root.append(sw)
+
+        text_view = Gtk.TextView()
+        text_view.set_monospace(True)
+        buffer = text_view.get_buffer()
+
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception:
+            content = "[]"
+        buffer.set_text(content)
+
+        sw.set_child(text_view)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_save = Gtk.Button(label="Save")
+        btn_close = Gtk.Button(label="Close")
+        actions.append(btn_save)
+        actions.append(btn_close)
+        root.append(actions)
+
+        def on_save(_btn):
+            start = buffer.get_start_iter()
+            end = buffer.get_end_iter()
+            new_text = buffer.get_text(start, end, True)
+            try:
+                path.write_text(new_text, encoding="utf-8")
+                # reload + sync legacy config.json and in-memory cfg
+                self.cfg = load_config()
+                self.refresh_all()
+            except Exception:
+                pass
+
+        btn_save.connect("clicked", on_save)
+        btn_close.connect("clicked", lambda *_: editor.close())
+
+        editor.present()
+
     def refresh_all(self):
         self.cfg = load_config()
         self.refresh_buses()
@@ -204,8 +255,9 @@ class MainWindow(Adw.ApplicationWindow):
         if pipewire_ok:
             default_sink = pa.get_default_sink() or "-"
             sink_count = len(pa.list_sinks())
+            sink_desc = pa.list_sink_descriptions().get(default_sink, default_sink)
             self.status_pipewire.set_text(f"PipeWire/Pulse: ✅ bereit ({sink_count} Sinks)")
-            self.status_default_sink.set_text(f"Default Sink: {default_sink}")
+            self.status_default_sink.set_text(f"Default Sink: {sink_desc}")
         else:
             self.status_pipewire.set_text("PipeWire/Pulse: ❌ nicht erreichbar")
             self.status_default_sink.set_text("Default Sink: -")
