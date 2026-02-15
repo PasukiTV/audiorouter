@@ -152,9 +152,10 @@ class MainWindow(Adw.ApplicationWindow):
         hdr_label.add_css_class("dim-label")
         hdr_route = Gtk.Label(label="Route target", xalign=0)
         hdr_route.set_hexpand(True)
+        hdr_route.set_margin_start(4)
         hdr_route.add_css_class("dim-label")
         hdr_action = Gtk.Label(label="Action", xalign=0)
-        hdr_action.set_width_chars(10)
+        hdr_action.set_size_request(110, -1)
         hdr_action.add_css_class("dim-label")
         bus_header.append(hdr_name)
         bus_header.append(hdr_label)
@@ -184,7 +185,7 @@ class MainWindow(Adw.ApplicationWindow):
         right.append(right_title)
 
         streams_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
-                                 margin_top=2, margin_bottom=2, margin_start=6, margin_end=6)
+                                 margin_top=2, margin_bottom=2, margin_start=0, margin_end=6)
         hdr_stream = Gtk.Label(label="Stream", xalign=0)
         hdr_stream.set_hexpand(True)
         hdr_stream.add_css_class("dim-label")
