@@ -12,7 +12,7 @@ from gi.repository import Gtk, Adw
 from .autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
 
 
-from .config import load_config, save_config
+from .config import RULES_PATH, VSINKS_PATH, load_config, save_config
 from . import pactl as pa
 # Apply changes immediately (no "Apply" button)
 from .core import apply_once
@@ -22,6 +22,11 @@ APP_ID = "de.pasuki.audiorouter"
 import re
 
 DONATE_URL = "https://www.paypal.me/audiorouter"
+
+
+def open_local_file(path: Path):
+    launcher = Gtk.UriLauncher.new(path.expanduser().resolve().as_uri())
+    launcher.launch(None)
 
 def open_donate(_btn):
     launcher = Gtk.UriLauncher.new(DONATE_URL)
@@ -86,6 +91,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.autostart_check.set_active(autostart_is_enabled())
         self.autostart_check.connect("toggled", self.on_autostart_toggled)
         root.append(self.autostart_check)
+
+        file_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_open_rules = Gtk.Button(label="Open Routing Rules")
+        btn_open_rules.connect("clicked", lambda *_: open_local_file(RULES_PATH))
+        btn_open_vsinks = Gtk.Button(label="Open vSinks")
+        btn_open_vsinks.connect("clicked", lambda *_: open_local_file(VSINKS_PATH))
+        file_buttons.append(btn_open_rules)
+        file_buttons.append(btn_open_vsinks)
+        root.append(file_buttons)
 
         # Lightweight status row (updates only on refresh)
         status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
