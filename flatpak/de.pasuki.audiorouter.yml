@@ -11,8 +11,6 @@ finish-args:
   - --socket=pulseaudio
   - --device=dri
   - --filesystem=xdg-config/autostart:rw
-  - --talk-name=org.freedesktop.portal.Background
-  - --talk-name=org.freedesktop.portal.Desktop
   - --talk-name=org.freedesktop.Flatpak
   - --env=GTK_A11Y=none
 
