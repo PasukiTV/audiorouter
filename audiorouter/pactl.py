@@ -26,6 +26,24 @@ def try_pactl(*args: str) -> str:
     return out if rc == 0 else ""
 
 
+def collect_debug_snapshot() -> str:
+    sections = [
+        ("info", ["info"]),
+        ("default_sink", ["get-default-sink"]),
+        ("sinks_short", ["list", "short", "sinks"]),
+        ("sources_short", ["list", "short", "sources"]),
+        ("modules_short", ["list", "short", "modules"]),
+        ("sink_inputs", ["list", "sink-inputs"]),
+    ]
+    blocks = []
+    for title, cmd in sections:
+        blocks.append(f"## {title}")
+        out = try_pactl(*cmd).strip()
+        blocks.append(out or "(no output)")
+        blocks.append("")
+    return "\n".join(blocks)
+
+
 def get_default_sink() -> str:
     return try_pactl("get-default-sink").strip()
 

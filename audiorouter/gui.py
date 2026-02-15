@@ -47,9 +47,11 @@ def make_bus_name(label: str, existing_names: set[str]) -> str:
 
 def friendly_sink_list():
     sinks = pa.list_sinks()
+    descriptions = pa.list_sink_descriptions()
     items = [("default", "Default (current default sink)")]
     for s in sinks:
-        items.append((s["name"], s["name"]))
+        name = s["name"]
+        items.append((name, descriptions.get(name, name)))
     return items
 
 
@@ -94,8 +96,11 @@ class MainWindow(Adw.ApplicationWindow):
         btn_open_rules.connect("clicked", lambda *_: self.open_json_editor(RULES_PATH, "Routing Rules"))
         btn_open_vsinks = Gtk.Button(label="Open vSinks")
         btn_open_vsinks.connect("clicked", lambda *_: self.open_json_editor(VSINKS_PATH, "vSinks"))
+        btn_debug = Gtk.Button(label="Audio Debug Snapshot")
+        btn_debug.connect("clicked", lambda *_: self.open_debug_snapshot())
         file_buttons.append(btn_open_rules)
         file_buttons.append(btn_open_vsinks)
+        file_buttons.append(btn_debug)
         root.append(file_buttons)
 
         # Lightweight status row (updates only on refresh)
@@ -145,6 +150,7 @@ class MainWindow(Adw.ApplicationWindow):
         hdr_route.set_hexpand(True)
         hdr_route.add_css_class("dim-label")
         hdr_action = Gtk.Label(label="Action", xalign=0)
+        hdr_action.set_width_chars(10)
         hdr_action.add_css_class("dim-label")
         bus_header.append(hdr_name)
         bus_header.append(hdr_label)
@@ -252,6 +258,65 @@ class MainWindow(Adw.ApplicationWindow):
             except Exception:
                 pass
 
+        btn_save.connect("clicked", on_save)
+        btn_close.connect("clicked", lambda *_: editor.close())
+
+        editor.present()
+
+    def open_debug_snapshot(self):
+        editor = Gtk.Window(title="Audio debug snapshot")
+        editor.set_transient_for(self)
+        editor.set_modal(True)
+        editor.set_default_size(840, 560)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                       margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+        editor.set_child(root)
+
+        help_lbl = Gtk.Label(
+            label="Share this snapshot when noise appears during routing switch."
+                  " It contains pactl state (sinks/sources/modules/inputs).",
+            xalign=0
+        )
+        help_lbl.set_wrap(True)
+        root.append(help_lbl)
+
+        sw = Gtk.ScrolledWindow()
+        sw.set_vexpand(True)
+        root.append(sw)
+
+        text_view = Gtk.TextView()
+        text_view.set_editable(False)
+        text_view.set_monospace(True)
+        buffer = text_view.get_buffer()
+        buffer.set_text(pa.collect_debug_snapshot())
+        sw.set_child(text_view)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_copy = Gtk.Button(label="Copy")
+        btn_save = Gtk.Button(label="Save to file")
+        btn_close = Gtk.Button(label="Close")
+        actions.append(btn_copy)
+        actions.append(btn_save)
+        actions.append(btn_close)
+        root.append(actions)
+
+        def _current_text() -> str:
+            start = buffer.get_start_iter()
+            end = buffer.get_end_iter()
+            return buffer.get_text(start, end, True)
+
+        def on_copy(_btn):
+            clip = self.get_clipboard()
+            clip.set(_current_text())
+
+        def on_save(_btn):
+            debug_dir = Path.home() / ".config" / "audiorouter"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            out = debug_dir / "debug-snapshot.txt"
+            out.write_text(_current_text(), encoding="utf-8")
+
+        btn_copy.connect("clicked", on_copy)
         btn_save.connect("clicked", on_save)
         btn_close.connect("clicked", lambda *_: editor.close())
 
@@ -368,6 +433,7 @@ class MainWindow(Adw.ApplicationWindow):
             box.append(dd)
 
             btn_del = Gtk.Button(label="Delete")
+            btn_del.set_size_request(110, -1)
             btn_del.connect("clicked", lambda *_ , bus=b["name"]: self.delete_bus(bus))
             box.append(btn_del)
 
