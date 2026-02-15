@@ -118,6 +118,7 @@ def apply_once() -> None:
         for sid in prev_inputs:
             pa.set_sink_input_mute(sid, True)
 
+        new_mod = ""
         try:
             if involves_virtual:
                 # For virtual-bus handover use break-before-make while muted to avoid
@@ -132,6 +133,12 @@ def apply_once() -> None:
                 pa.cleanup_wrong_loopbacks_for_source(monitor, target)
                 time.sleep(PHYSICAL_SWITCH_MUTE_SEC)
         finally:
+            # Ensure we never leave loopback inputs muted after the transition.
+            for sid in prev_inputs:
+                pa.set_sink_input_mute(sid, False)
+            if new_mod:
+                for sid in pa.sink_inputs_for_owner_module(new_mod):
+                    pa.set_sink_input_mute(sid, False)
             pa.set_source_mute(monitor, False)
             pa.set_sink_mute(name, False)
 
