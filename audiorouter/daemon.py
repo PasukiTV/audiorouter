@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import os
 import signal
+import subprocess
 import time
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from .core import apply_once
 from . import pactl as pa
 
 _STOP = False
+EVENT_DEBOUNCE_SEC = 0.05
 
 
 def _handle_stop(_sig, _frame):
@@ -115,14 +117,14 @@ def run_daemon():
     except Exception:
         pass
 
-    # 3) Event-driven if pulsectl is available, otherwise fallback polling
+    # 3) Event-driven if pulsectl is available, otherwise fallback subscribe
     try:
         import pulsectl  # type: ignore
     except Exception:
         pulsectl = None
 
     if pulsectl is None:
-        _fallback_poll()
+        _fallback_subscribe()
         return
 
     # Reconnect loop (important!)
@@ -137,7 +139,7 @@ def run_daemon():
                 def cb(_ev):
                     nonlocal last
                     now = time.monotonic()
-                    if now - last < 0.25:
+                    if now - last < EVENT_DEBOUNCE_SEC:
                         return
                     last = now
                     try:
@@ -161,4 +163,54 @@ def _fallback_poll():
             apply_once()
         except Exception:
             pass
+        time.sleep(1.0)
+
+
+def _fallback_subscribe():
+    """
+    Event fallback without pulsectl.
+    Uses `pactl subscribe` so new streams are moved quickly and don't audibly
+    start on the default sink before rule-based routing applies.
+    """
+    while not _STOP:
+        proc = None
+        try:
+            cmd = ["pactl", "subscribe"]
+            if os.environ.get("FLATPAK_ID") or Path("/.flatpak-info").exists():
+                cmd = ["flatpak-spawn", "--host", *cmd]
+
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+            )
+
+            last = 0.0
+            while not _STOP and proc.stdout is not None:
+                line = proc.stdout.readline()
+                if not line:
+                    break
+
+                now = time.monotonic()
+                if now - last < EVENT_DEBOUNCE_SEC:
+                    continue
+                last = now
+
+                try:
+                    apply_once()
+                except Exception:
+                    pass
+
+        except Exception:
+            pass
+        finally:
+            if proc and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=0.5)
+                except Exception:
+                    proc.kill()
+
         time.sleep(1.0)
