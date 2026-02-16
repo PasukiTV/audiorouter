@@ -11,6 +11,10 @@ if os.path.isdir(LIBDIR) and LIBDIR not in sys.path:
 
 
 def main():
+    if "--trace" in sys.argv:
+        os.environ["AUDIOROUTER_TRACE"] = "1"
+        sys.argv = [a for a in sys.argv if a != "--trace"]
+
     daemon_mode = ("--daemon" in sys.argv) or ("--background" in sys.argv)
 
     if daemon_mode:

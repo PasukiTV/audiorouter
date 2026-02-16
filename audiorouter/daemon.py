@@ -118,12 +118,16 @@ def _is_new_sink_input_event_line(line: str) -> bool:
 
 
 def run_daemon():
+    trace("daemon_start")
+
     # Single-instance guard
     if not _try_acquire_daemon_lock():
+        trace("daemon_lock_busy")
         return
 
     # 1) Wait for PipeWire/Pulse to be ready
     if not wait_for_pipewire():
+        trace("daemon_pipewire_timeout")
         return
 
     # 2) Apply once initially
