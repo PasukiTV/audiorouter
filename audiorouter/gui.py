@@ -911,11 +911,11 @@ class MainWindow(Adw.ApplicationWindow):
                     tgt = app_targets[dropdown.get_selected()]
                     try:
                         if _is_no_routing_target(tgt):
-                            # clear bus routing for this live stream by moving it off virtual buses
-                            # to the current physical default sink.
-                            tgt = pa.get_physical_default_sink()
-                        if tgt:
-                            pa.move_sink_input(sink_input_id, tgt)
+                            # no explicit routing for this live stream: do not force a move.
+                            # (especially do not move to default sink)
+                            self.refresh_all()
+                            return
+                        pa.move_sink_input(sink_input_id, tgt)
                     except Exception:
                         pass
                     self.refresh_all()
