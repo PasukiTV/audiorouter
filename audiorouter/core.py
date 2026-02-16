@@ -281,6 +281,14 @@ def apply_once() -> None:
         route_to = b.get("route_to", "default")
 
         # Resolve target safely
+        if route_to == "none":
+            prev_mod = str(st["route_modules"].get(name, "") or "")
+            if prev_mod:
+                pa.unload_module(prev_mod)
+            st["route_modules"].pop(name, None)
+            st["route_target"][name] = "none"
+            continue
+
         target = _get_physical_default_sink() if route_to == "default" else route_to
         if not target:
             continue

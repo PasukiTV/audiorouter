@@ -51,7 +51,7 @@ def make_bus_name(label: str, existing_names: set[str]) -> str:
 def friendly_sink_list():
     sinks = pa.list_sinks()
     descriptions = pa.list_sink_descriptions()
-    items = [("default", "Default (current default sink)")]
+    items = [("default", "Default (current default sink)"), ("none", "No routing")]
     for s in sinks:
         name = s["name"]
         items.append((name, descriptions.get(name, name)))
@@ -739,9 +739,8 @@ class MainWindow(Adw.ApplicationWindow):
             sid = str(src.get("id", ""))
 
             friendly = source_desc.get(source_name, source_name)
-            label = Gtk.Label(label=f"#{sid}  {friendly}\n{source_name}", xalign=0)
+            label = Gtk.Label(label=f"#{sid}  {friendly}", xalign=0)
             label.set_hexpand(True)
-            label.set_wrap(True)
             label.set_tooltip_text(source_name)
             box.append(label)
 
