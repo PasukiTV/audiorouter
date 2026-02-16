@@ -911,8 +911,12 @@ class MainWindow(Adw.ApplicationWindow):
                     tgt = app_targets[dropdown.get_selected()]
                     try:
                         if _is_no_routing_target(tgt):
-                            # no explicit routing for this live stream: do not force a move.
-                            # (especially do not move to default sink)
+                            # Clear explicit bus routing for this live stream by moving it
+                            # to the neutral master bus (if available).
+                            # We intentionally do not move to the physical default sink.
+                            sink_names = {s["name"] for s in pa.list_sinks()}
+                            if "vsink.master" in sink_names:
+                                pa.move_sink_input(sink_input_id, "vsink.master")
                             self.refresh_all()
                             return
                         pa.move_sink_input(sink_input_id, tgt)
