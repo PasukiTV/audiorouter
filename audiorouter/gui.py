@@ -14,7 +14,7 @@ from gi.repository import Gtk, Adw, Pango, GLib, Gio
 from .autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
 
 
-from .config import RULES_PATH, VSINKS_PATH, load_config, save_config
+from .config import INPUT_RULES_PATH, RULES_PATH, VSINKS_PATH, load_config, save_config
 from . import pactl as pa
 # Apply changes immediately (no "Apply" button)
 from .core import apply_once
@@ -283,6 +283,10 @@ class MainWindow(Adw.ApplicationWindow):
         act_open_vsinks.connect("activate", lambda *_: self.open_json_editor(VSINKS_PATH, "vSinks"))
         actions.add_action(act_open_vsinks)
 
+        act_open_input_rules = Gio.SimpleAction.new("open_input_rules", None)
+        act_open_input_rules.connect("activate", lambda *_: self.open_json_editor(INPUT_RULES_PATH, "Input Device Rules"))
+        actions.add_action(act_open_input_rules)
+
         act_debug_snapshot = Gio.SimpleAction.new("debug_snapshot", None)
         act_debug_snapshot.connect("activate", lambda *_: self.open_debug_snapshot())
         actions.add_action(act_debug_snapshot)
@@ -299,6 +303,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         cfg_menu = Gio.Menu()
         cfg_menu.append("Open Routing Rules", "win.open_rules")
+        cfg_menu.append("Open Input Device Rules", "win.open_input_rules")
         cfg_menu.append("Open vSinks", "win.open_vsinks")
 
         debug_menu = Gio.Menu()
@@ -764,11 +769,22 @@ class MainWindow(Adw.ApplicationWindow):
                     tgt_bus = buses[dropdown.get_selected()]
                     try:
                         # transient move only: do not create/update persistent Add Rule entries
+                        if not pa.source_exists(source_name):
+                            self._show_message("Input route error", f"Input source not found\n{source_name}")
+                            return
+                        if not pa.sink_exists(tgt_bus):
+                            self._show_message("Input route error", f"Target bus not found\n{tgt_bus}")
+                            return
+
                         pa.cleanup_wrong_loopbacks_for_source(source_name, tgt_bus)
                         if not pa.loopback_exists(source_name, tgt_bus):
                             pa.load_loopback(source_name, tgt_bus, latency_msec=30)
-                    except Exception:
-                        pass
+
+                        # verify loopback exists after action
+                        if not pa.loopback_exists(source_name, tgt_bus):
+                            self._show_message("Input route warning", f"Could not create loopback\n{source_name} -> {tgt_bus}")
+                    except Exception as exc:
+                        self._show_message("Input route error", str(exc))
                     self.refresh_all()
 
                 btn_move = Gtk.Button(label="Route to Bus")

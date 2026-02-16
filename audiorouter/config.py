@@ -14,6 +14,7 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 # Preferred split config files for easier direct editing
 VSINKS_PATH = CONFIG_DIR / "vsinks.json"
 RULES_PATH = CONFIG_DIR / "routing-rules.json"
+INPUT_RULES_PATH = CONFIG_DIR / "input-routes.json"
 
 STATE_PATH = STATE_DIR / "state.json"
 
@@ -43,14 +44,14 @@ def load_config() -> Dict[str, Any]:
     ensure_dirs()
 
     # Preferred: split files
-    has_split = VSINKS_PATH.exists() or RULES_PATH.exists()
+    has_split = VSINKS_PATH.exists() or RULES_PATH.exists() or INPUT_RULES_PATH.exists()
     if has_split:
         legacy = _read_json(CONFIG_PATH, {})
         cfg = {
             "buses": _read_json(VSINKS_PATH, []),
             "rules": _read_json(RULES_PATH, []),
             "mic_routes": legacy.get("mic_routes", []) if isinstance(legacy, dict) else [],
-            "input_routes": legacy.get("input_routes", []) if isinstance(legacy, dict) else [],
+            "input_routes": _read_json(INPUT_RULES_PATH, legacy.get("input_routes", []) if isinstance(legacy, dict) else []),
         }
         save_config(cfg)
         return cfg
@@ -82,6 +83,7 @@ def save_config(cfg: Dict[str, Any]) -> None:
     # Keep both split files and legacy config in sync.
     VSINKS_PATH.write_text(json.dumps(normalized["buses"], indent=2), encoding="utf-8")
     RULES_PATH.write_text(json.dumps(normalized["rules"], indent=2), encoding="utf-8")
+    INPUT_RULES_PATH.write_text(json.dumps(normalized["input_routes"], indent=2), encoding="utf-8")
     CONFIG_PATH.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
 
 
