@@ -865,7 +865,7 @@ class MainWindow(Adw.ApplicationWindow):
             return 0
 
         buses = [b["name"] for b in self.cfg.get("buses", [])]
-        app_targets = ["no routing", *buses]
+        app_targets = list(buses)
         rules = self.cfg.get("rules", [])
 
         # Map sink_id -> sink_name
@@ -910,15 +910,6 @@ class MainWindow(Adw.ApplicationWindow):
                 def on_move(_btn, sink_input_id=sid, dropdown=dd):
                     tgt = app_targets[dropdown.get_selected()]
                     try:
-                        if _is_no_routing_target(tgt):
-                            # Clear explicit bus routing for this live stream by moving it
-                            # to the neutral master bus (if available).
-                            # We intentionally do not move to the physical default sink.
-                            sink_names = {s["name"] for s in pa.list_sinks()}
-                            if "vsink.master" in sink_names:
-                                pa.move_sink_input(sink_input_id, "vsink.master")
-                            self.refresh_all()
-                            return
                         pa.move_sink_input(sink_input_id, tgt)
                     except Exception:
                         pass
