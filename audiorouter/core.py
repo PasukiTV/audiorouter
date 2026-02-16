@@ -4,6 +4,7 @@ import time
 
 VIRTUAL_SWITCH_MUTE_SEC = 0.12
 PHYSICAL_SWITCH_MUTE_SEC = 0.05
+SYSTEM_STREAM_MOVE_MUTE_SEC = 0.04
 
 """
 Core logic for audiorouter.
@@ -77,7 +78,17 @@ def _is_system_stream(props: dict) -> bool:
     if app_id.startswith("org.freedesktop.impl.portal") and "portal" in media_name:
         return True
 
-    return "system sound" in media_name or "notification" in media_name
+    return any(token in media_name for token in {"system sound", "system sounds", "systemklänge", "benachrichtigung", "notification", "event"})
+
+
+def _move_input_quietly(sink_input_id: str, target_sink: str, mute_sec: float = 0.0) -> None:
+    pa.set_sink_input_mute(sink_input_id, True)
+    try:
+        pa.move_sink_input(sink_input_id, target_sink)
+        if mute_sec > 0:
+            time.sleep(mute_sec)
+    finally:
+        pa.set_sink_input_mute(sink_input_id, False)
 
 
 def apply_once() -> None:
@@ -229,7 +240,7 @@ def apply_once() -> None:
 
         if have_system_bus and _is_system_stream(props):
             try:
-                pa.move_sink_input(str(inp["id"]), system_bus)
+                _move_input_quietly(str(inp["id"]), system_bus, mute_sec=SYSTEM_STREAM_MOVE_MUTE_SEC)
             except Exception:
                 pass
 
