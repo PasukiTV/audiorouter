@@ -200,6 +200,21 @@ def load_null_sink(bus_name: str, label: str) -> str:
     return module_id
 
 
+
+
+def current_loopback_sink_for_source(source_name: str) -> str:
+    """Return the current loopback sink for a given source (first match), or ""."""
+    for m in list_modules():
+        if m.get("name") != "module-loopback":
+            continue
+        args = m.get("args", "") or ""
+        if f"source={source_name}" not in args:
+            continue
+        for tok in args.split():
+            if tok.startswith("sink="):
+                return tok.split("=", 1)[1]
+    return ""
+
 def loopback_exists(source_name: str, sink_name: str) -> bool:
     for m in list_modules():
         if m.get("name") != "module-loopback":

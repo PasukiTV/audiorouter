@@ -755,9 +755,13 @@ class MainWindow(Adw.ApplicationWindow):
                 dd.set_size_request(170, -1)
                 self.mic_target_group.add_widget(dd)
 
+                current_target = pa.current_loopback_sink_for_source(source_name)
                 rule_idx = self._find_input_rule_index(input_routes, source_name)
                 has_rule = rule_idx >= 0
-                if has_rule:
+
+                if current_target and current_target in input_targets:
+                    dd.set_selected(input_targets.index(current_target))
+                elif has_rule:
                     target_bus = input_routes[rule_idx].get("target_bus")
                     if target_bus in input_targets:
                         dd.set_selected(input_targets.index(target_bus))
