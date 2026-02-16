@@ -903,7 +903,7 @@ class MainWindow(Adw.ApplicationWindow):
                 if cur_sink_name in app_targets:
                     dd.set_selected(app_targets.index(cur_sink_name))
                 else:
-                    # default to no routing
+                    # default to first available bus
                     dd.set_selected(0)
 
 
@@ -930,7 +930,7 @@ class MainWindow(Adw.ApplicationWindow):
                 # If rule exists: preselect its target bus in the dropdown
                 if has_rule:
                     target_bus = rules[rule_idx].get("target_bus")
-                    target_bus_norm = "no routing" if _is_no_routing_target(str(target_bus)) else str(target_bus)
+                    target_bus_norm = str(target_bus)
                     if target_bus_norm in app_targets:
                         dd.set_selected(app_targets.index(target_bus_norm))
 
@@ -957,8 +957,7 @@ class MainWindow(Adw.ApplicationWindow):
 
                     # add rule
                     target = app_targets[dropdown.get_selected()]
-                    if not _is_no_routing_target(target):
-                        cfg["rules"].append({"match": match, "target_bus": target})
+                    cfg["rules"].append({"match": match, "target_bus": target})
                     save_config(cfg)
                     apply_once()
                     self.refresh_all()
