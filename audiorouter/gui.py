@@ -69,7 +69,7 @@ def is_internal_loopback(inp: dict) -> bool:
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application):
         super().__init__(application=app)
-        self.set_title("audiorouter")
+        self.set_title("AudioRouter")
         self.set_default_size(1180, 720)
         self.set_size_request(980, 620)
 
