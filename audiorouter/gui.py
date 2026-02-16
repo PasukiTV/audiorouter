@@ -3,20 +3,22 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from pathlib import Path
 
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Pango, GLib
+from gi.repository import Gtk, Adw, Pango, GLib, Gio
 
 from .autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
 
 
-from .config import RULES_PATH, VSINKS_PATH, load_config, save_config
+from .config import INPUT_RULES_PATH, RULES_PATH, VSINKS_PATH, load_config, save_config
 from . import pactl as pa
 # Apply changes immediately (no "Apply" button)
 from .core import apply_once
+from .system_policy import install_system_sound_policy, remove_system_sound_policy, restart_pipewire_pulse, system_sound_policy_installed
 
 APP_ID = "de.pasuki.audiorouter"
 
@@ -49,12 +51,18 @@ def make_bus_name(label: str, existing_names: set[str]) -> str:
 def friendly_sink_list():
     sinks = pa.list_sinks()
     descriptions = pa.list_sink_descriptions()
-    items = [("default", "Default (current default sink)")]
+    items = [("default", "Default (current default sink)"), ("none", "No routing")]
     for s in sinks:
         name = s["name"]
         items.append((name, descriptions.get(name, name)))
     return items
 
+
+
+
+def _is_no_routing_target(target: str) -> bool:
+    t = (target or "").strip().lower()
+    return t in {"none", "no routing"}
 
 def is_internal_loopback(inp: dict) -> bool:
     props = inp.get("props", {})
@@ -67,7 +75,7 @@ def is_internal_loopback(inp: dict) -> bool:
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application):
         super().__init__(application=app)
-        self.set_title("audiorouter")
+        self.set_title("AudioRouter")
         self.set_default_size(1180, 720)
         self.set_size_request(980, 620)
 
@@ -79,6 +87,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.stream_target_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         self.stream_move_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         self.stream_rule_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        self.mic_target_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        self.mic_move_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        self.mic_rule_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
                        margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
@@ -86,6 +97,8 @@ class MainWindow(Adw.ApplicationWindow):
 
         header = Adw.HeaderBar()
         root.append(header)
+
+        self._setup_header_menu(header)
 
         btn_donate = Gtk.Button(label="Donate ❤️")
         btn_donate.add_css_class("suggested-action")  # schöner GNOME-Look
@@ -99,32 +112,32 @@ class MainWindow(Adw.ApplicationWindow):
         self.autostart_check.connect("toggled", self.on_autostart_toggled)
         root.append(self.autostart_check)
 
-        file_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        btn_open_rules = Gtk.Button(label="Open Routing Rules")
-        btn_open_rules.connect("clicked", lambda *_: self.open_json_editor(RULES_PATH, "Routing Rules"))
-        btn_open_vsinks = Gtk.Button(label="Open vSinks")
-        btn_open_vsinks.connect("clicked", lambda *_: self.open_json_editor(VSINKS_PATH, "vSinks"))
-        btn_debug = Gtk.Button(label="Audio Debug Snapshot")
-        btn_debug.connect("clicked", lambda *_: self.open_debug_snapshot())
-        file_buttons.append(btn_open_rules)
-        file_buttons.append(btn_open_vsinks)
-        file_buttons.append(btn_debug)
-        root.append(file_buttons)
+        quick_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        quick_actions.set_homogeneous(False)
 
-        # Lightweight status row (updates only on refresh)
-        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        self.status_pipewire = Gtk.Label(xalign=0)
-        self.status_default_sink = Gtk.Label(xalign=0)
-        self.status_daemon = Gtk.Label(xalign=0)
-        self.status_streams = Gtk.Label(xalign=0)
-        for lbl in (self.status_pipewire, self.status_default_sink, self.status_daemon, self.status_streams):
-            lbl.set_ellipsize(Pango.EllipsizeMode.END)
-            lbl.set_max_width_chars(42)
-        status_row.append(self.status_pipewire)
-        status_row.append(self.status_default_sink)
-        status_row.append(self.status_daemon)
-        status_row.append(self.status_streams)
-        root.append(status_row)
+        self.btn_policy_toggle = Gtk.Button(label="")
+        self.btn_policy_toggle.add_css_class("suggested-action")
+        self.btn_policy_toggle.connect("clicked", lambda *_: self.toggle_system_sound_policy())
+
+        quick_actions.append(self.btn_policy_toggle)
+        root.append(quick_actions)
+
+        status_cards = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        self.status_card_pipewire = self._make_status_card("🔊", "PipeWire/Pulse")
+        self.status_card_default_sink = self._make_status_card("🎯", "Default Sink")
+        self.status_card_daemon = self._make_status_card("⚙️", "Daemon")
+        self.status_card_streams = self._make_status_card("🎵", "Aktive Streams")
+
+        for card in (
+            self.status_card_pipewire,
+            self.status_card_default_sink,
+            self.status_card_daemon,
+            self.status_card_streams,
+        ):
+            status_cards.append(card["frame"])
+
+        root.append(status_cards)
 
         btn_refresh = Gtk.Button(label="Refresh")
         btn_refresh.connect("clicked", lambda *_: self.refresh_all())
@@ -169,7 +182,12 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.bus_list = Gtk.ListBox()
         self.bus_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        left.append(self.bus_list)
+        buses_scroll = Gtk.ScrolledWindow()
+        buses_scroll.set_vexpand(True)
+        buses_scroll.set_hexpand(True)
+        buses_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        buses_scroll.set_child(self.bus_list)
+        left.append(buses_scroll)
 
         add_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.entry_bus_label = Gtk.Entry(placeholder_text="Browser")
@@ -213,11 +231,150 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.stream_list = Gtk.ListBox()
         self.stream_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        right.append(self.stream_list)
+        streams_scroll = Gtk.ScrolledWindow()
+        streams_scroll.set_vexpand(True)
+        streams_scroll.set_hexpand(True)
+        streams_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        streams_scroll.set_child(self.stream_list)
+        right.append(streams_scroll)
 
+        mic_title = Gtk.Label(label="Running input devices", xalign=0)
+        mic_title.add_css_class("title-3")
+        right.append(mic_title)
+
+        mic_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
+                             margin_top=2, margin_bottom=2, margin_start=0, margin_end=6)
+        hdr_mic_stream = Gtk.Label(label="Input device", xalign=0)
+        hdr_mic_stream.set_hexpand(True)
+        hdr_mic_stream.add_css_class("dim-label")
+        hdr_mic_target = Gtk.Label(label="Target bus", xalign=0)
+        hdr_mic_target.set_halign(Gtk.Align.START)
+        hdr_mic_target.add_css_class("dim-label")
+        self.mic_target_group.add_widget(hdr_mic_target)
+        hdr_mic_move = Gtk.Label(label="Move", xalign=0)
+        hdr_mic_move.set_halign(Gtk.Align.START)
+        hdr_mic_move.add_css_class("dim-label")
+        self.mic_move_group.add_widget(hdr_mic_move)
+        hdr_mic_rule = Gtk.Label(label="Rule", xalign=0)
+        hdr_mic_rule.set_halign(Gtk.Align.START)
+        hdr_mic_rule.add_css_class("dim-label")
+        self.mic_rule_group.add_widget(hdr_mic_rule)
+        mic_header.append(hdr_mic_stream)
+        mic_header.append(hdr_mic_target)
+        mic_header.append(hdr_mic_move)
+        mic_header.append(hdr_mic_rule)
+        right.append(mic_header)
+
+        self.mic_stream_list = Gtk.ListBox()
+        self.mic_stream_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        mic_scroll = Gtk.ScrolledWindow()
+        mic_scroll.set_vexpand(True)
+        mic_scroll.set_hexpand(True)
+        mic_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        mic_scroll.set_min_content_height(180)
+        mic_scroll.set_child(self.mic_stream_list)
+        right.append(mic_scroll)
 
         apply_once()
         self.refresh_all()
+
+    def _setup_header_menu(self, header: Adw.HeaderBar) -> None:
+        actions = Gio.SimpleActionGroup()
+
+        act_open_rules = Gio.SimpleAction.new("open_rules", None)
+        act_open_rules.connect("activate", lambda *_: self.open_json_editor(RULES_PATH, "Routing Rules"))
+        actions.add_action(act_open_rules)
+
+        act_open_vsinks = Gio.SimpleAction.new("open_vsinks", None)
+        act_open_vsinks.connect("activate", lambda *_: self.open_json_editor(VSINKS_PATH, "vSinks"))
+        actions.add_action(act_open_vsinks)
+
+        act_open_input_rules = Gio.SimpleAction.new("open_input_rules", None)
+        act_open_input_rules.connect("activate", lambda *_: self.open_json_editor(INPUT_RULES_PATH, "Input Device Rules"))
+        actions.add_action(act_open_input_rules)
+
+        act_debug_snapshot = Gio.SimpleAction.new("debug_snapshot", None)
+        act_debug_snapshot.connect("activate", lambda *_: self.open_debug_snapshot())
+        actions.add_action(act_debug_snapshot)
+
+        act_delete_lock = Gio.SimpleAction.new("delete_daemon_lock", None)
+        act_delete_lock.connect("activate", lambda *_: self.delete_daemon_rules_file())
+        actions.add_action(act_delete_lock)
+
+        act_donate = Gio.SimpleAction.new("donate", None)
+        act_donate.connect("activate", lambda *_: open_donate(None))
+        actions.add_action(act_donate)
+
+        self.insert_action_group("win", actions)
+
+        cfg_menu = Gio.Menu()
+        cfg_menu.append("Open Routing Rules", "win.open_rules")
+        cfg_menu.append("Open Input Device Rules", "win.open_input_rules")
+        cfg_menu.append("Open vSinks", "win.open_vsinks")
+
+        debug_menu = Gio.Menu()
+        debug_menu.append("Audio Debug Snapshot", "win.debug_snapshot")
+        debug_menu.append("Delete audiorouter-deamon.lock", "win.delete_daemon_lock")
+
+        help_menu = Gio.Menu()
+        help_menu.append("Donate", "win.donate")
+
+        root_menu = Gio.Menu()
+        root_menu.append_submenu("Configuration", cfg_menu)
+        root_menu.append_submenu("DEBUG", debug_menu)
+        root_menu.append_submenu("Help", help_menu)
+
+        menu_btn = Gtk.MenuButton()
+        menu_btn.set_icon_name("open-menu-symbolic")
+        menu_btn.set_tooltip_text("Open menu")
+        menu_btn.set_menu_model(root_menu)
+        header.pack_end(menu_btn)
+
+    def _make_status_card(self, icon: str, title: str) -> dict:
+        frame = Gtk.Frame()
+        frame.set_hexpand(True)
+
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=4,
+            margin_top=8,
+            margin_bottom=8,
+            margin_start=10,
+            margin_end=10,
+        )
+
+        title_lbl = Gtk.Label(label=f"{icon} {title}", xalign=0)
+        title_lbl.add_css_class("dim-label")
+
+        value_lbl = Gtk.Label(xalign=0)
+        value_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        value_lbl.set_max_width_chars(36)
+
+        box.append(title_lbl)
+        box.append(value_lbl)
+        frame.set_child(box)
+        return {"frame": frame, "title": title_lbl, "value": value_lbl}
+
+    def _set_status_card(self, card: dict, value: str) -> None:
+        val = card["value"]
+        val.set_text(value)
+        val.set_tooltip_text(value)
+
+    def _refresh_policy_toggle_button(self) -> None:
+        installed = system_sound_policy_installed()
+        if installed:
+            self.btn_policy_toggle.set_label("System Sound Policy entfernen")
+            self.btn_policy_toggle.remove_css_class("suggested-action")
+            self.btn_policy_toggle.add_css_class("destructive-action")
+            self.btn_policy_toggle.set_tooltip_text("Entfernt die Systemsound-Policy (route system sounds to vsink.system) und startet PipeWire/Pulse neu.")
+        else:
+            self.btn_policy_toggle.set_label("System Sound Policy installieren")
+            self.btn_policy_toggle.remove_css_class("destructive-action")
+            self.btn_policy_toggle.add_css_class("suggested-action")
+            self.btn_policy_toggle.set_tooltip_text("Installiert die Systemsound-Policy (route system sounds to vsink.system) und startet PipeWire/Pulse neu.")
+
+    def toggle_system_sound_policy(self) -> None:
+        self._apply_system_policy_async(not system_sound_policy_installed())
 
 
     def open_json_editor(self, path: Path, title: str):
@@ -334,21 +491,110 @@ class MainWindow(Adw.ApplicationWindow):
 
         editor.present()
 
+    def _show_message(self, title: str, message: str) -> None:
+        dialog = Gtk.MessageDialog(
+            transient_for=self,
+            modal=True,
+            buttons=Gtk.ButtonsType.OK,
+            text=title,
+            secondary_text=message,
+        )
+        dialog.connect("response", lambda d, _r: d.close())
+        dialog.present()
+
+    def _reload_audio_stack_and_reapply(self) -> None:
+        restart_pipewire_pulse()
+
+        # PipeWire restart drops runtime virtual sinks/modules. Re-apply routing
+        # once the server is reachable again so vsinks are recreated.
+        for _ in range(30):
+            if pa.try_pactl("info").strip():
+                try:
+                    apply_once()
+                except Exception:
+                    pass
+                return
+            time.sleep(0.2)
+
+    def _ensure_system_bus_exists(self) -> None:
+        cfg = load_config()
+        cfg.setdefault("buses", [])
+        if any((b.get("name") == "vsink.system") for b in cfg.get("buses", [])):
+            return
+        cfg["buses"].append({"name": "vsink.system", "label": "System", "route_to": "default"})
+        save_config(cfg)
+        apply_once()
+
+    def _apply_system_policy_async(self, install: bool) -> None:
+        def _worker():
+            try:
+                if install:
+                    self._ensure_system_bus_exists()
+                    path = install_system_sound_policy("vsink.system")
+                    self._reload_audio_stack_and_reapply()
+                    msg = f"Policy installed:\n{path}\n\nPipeWire-Pulse was restarted."
+                    title = "System sound policy installed"
+                else:
+                    path = remove_system_sound_policy()
+                    self._reload_audio_stack_and_reapply()
+                    msg = f"Policy removed:\n{path}\n\nPipeWire-Pulse was restarted."
+                    title = "System sound policy removed"
+            except Exception as exc:
+                title = "System sound policy error"
+                msg = str(exc)
+
+            GLib.idle_add(self.refresh_all)
+            GLib.idle_add(self._show_message, title, msg)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def install_system_sound_policy(self) -> None:
+        self._apply_system_policy_async(True)
+
+    def remove_system_sound_policy(self) -> None:
+        self._apply_system_policy_async(False)
+
+    def delete_daemon_rules_file(self) -> None:
+        def _worker():
+            try:
+                cache_dir = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
+                requested = cache_dir / "audiorouter-deamon.lock"
+                legacy = cache_dir / "audiorouter-daemon.lock"
+
+                deleted: list[Path] = []
+                for path in (requested, legacy):
+                    if path.exists():
+                        path.unlink()
+                        deleted.append(path)
+
+                if deleted:
+                    title = "audiorouter-deamon.lock deleted"
+                    msg = "Deleted file(s):\n" + "\n".join(str(p) for p in deleted)
+                else:
+                    title = "No lock file found"
+                    msg = f"Neither of these files exists:\n{requested}\n{legacy}"
+            except Exception as exc:
+                title = "Delete audiorouter-deamon.lock error"
+                msg = str(exc)
+
+            GLib.idle_add(self.refresh_all)
+            GLib.idle_add(self._show_message, title, msg)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def refresh_all(self):
         self.cfg = load_config()
         self.refresh_buses()
         stream_count = self.refresh_streams()
-        self.refresh_status(stream_count)
+        mic_count = self.refresh_mic_streams()
+        self.refresh_status(stream_count + mic_count)
+        self._refresh_policy_toggle_button()
 
     def on_autostart_toggled(self, btn: Gtk.CheckButton):
         state = btn.get_active()
-        print("AUTOSTART TOGGLED:", state)
-
         if state:
-            print("-> enable()")
             autostart_enable()
         else:
-            print("-> disable()")
             autostart_disable()
 
 
@@ -381,14 +627,14 @@ class MainWindow(Adw.ApplicationWindow):
             default_sink = pa.get_default_sink() or "-"
             sink_count = len(pa.list_sinks())
             sink_desc = pa.list_sink_descriptions().get(default_sink, default_sink)
-            self.status_pipewire.set_text(f"PipeWire/Pulse: ✅ bereit ({sink_count} Sinks)")
-            self.status_default_sink.set_text(f"Default Sink: {sink_desc}")
+            self._set_status_card(self.status_card_pipewire, f"✅ bereit ({sink_count} Sinks)")
+            self._set_status_card(self.status_card_default_sink, sink_desc)
         else:
-            self.status_pipewire.set_text("PipeWire/Pulse: ❌ nicht erreichbar")
-            self.status_default_sink.set_text("Default Sink: -")
+            self._set_status_card(self.status_card_pipewire, "❌ nicht erreichbar")
+            self._set_status_card(self.status_card_default_sink, "-")
 
-        self.status_daemon.set_text(f"Daemon: {'✅ läuft' if self._daemon_running() else '⚠️ gestoppt'}")
-        self.status_streams.set_text(f"Aktive Streams: {stream_count}")
+        self._set_status_card(self.status_card_daemon, "✅ läuft" if self._daemon_running() else "⚠️ gestoppt")
+        self._set_status_card(self.status_card_streams, str(stream_count))
 
     def refresh_buses(self):
         for child in list(self.bus_list):
@@ -469,6 +715,134 @@ class MainWindow(Adw.ApplicationWindow):
         return -1
  
  
+    def _find_input_rule_index(self, rules: list, source_name: str) -> int:
+        for idx, r in enumerate(rules):
+            if str(r.get("source", "")).strip() == source_name:
+                return idx
+        return -1
+
+    def refresh_mic_streams(self):
+        for child in list(self.mic_stream_list):
+            self.mic_stream_list.remove(child)
+
+        sources = [s for s in pa.list_sources() if not s.get("name", "").endswith(".monitor")]
+
+        if not sources:
+            row = Gtk.ListBoxRow()
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
+                          margin_top=6, margin_bottom=6, margin_start=6, margin_end=6)
+            row.set_child(box)
+            box.append(Gtk.Label(label="Keine Eingabegeräte gefunden.", xalign=0))
+            self.mic_stream_list.append(row)
+            return 0
+
+        buses = [b["name"] for b in self.cfg.get("buses", [])]
+        input_targets = ["no routing", *buses]
+        input_routes = self.cfg.get("input_routes", [])
+        source_desc = pa.list_source_descriptions()
+
+        for src in sources:
+            row = Gtk.ListBoxRow()
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
+                          margin_top=6, margin_bottom=6, margin_start=6, margin_end=6)
+            row.set_child(box)
+
+            source_name = str(src.get("name", ""))
+            sid = str(src.get("id", ""))
+
+            friendly = source_desc.get(source_name, source_name)
+            label = Gtk.Label(label=f"#{sid}  {friendly}", xalign=0)
+            label.set_hexpand(True)
+            label.set_tooltip_text(source_name)
+            box.append(label)
+
+            if input_targets:
+                dd = Gtk.DropDown.new_from_strings(input_targets)
+                dd.set_size_request(170, -1)
+                self.mic_target_group.add_widget(dd)
+
+                current_target = pa.current_loopback_sink_for_source(source_name)
+                rule_idx = self._find_input_rule_index(input_routes, source_name)
+                has_rule = rule_idx >= 0
+
+                if current_target and current_target in input_targets:
+                    dd.set_selected(input_targets.index(current_target))
+                elif has_rule:
+                    target_bus = input_routes[rule_idx].get("target_bus")
+                    target_bus_norm = "no routing" if _is_no_routing_target(str(target_bus)) else str(target_bus)
+                    if target_bus_norm in input_targets:
+                        dd.set_selected(input_targets.index(target_bus_norm))
+                    else:
+                        dd.set_selected(0)
+                else:
+                    dd.set_selected(0)
+
+                def on_move(_btn, source_name=source_name, dropdown=dd):
+                    tgt_bus = input_targets[dropdown.get_selected()]
+                    try:
+                        # transient move only: do not create/update persistent Add Rule entries
+                        if not pa.source_exists(source_name):
+                            self._show_message("Input route error", f"Input source not found\n{source_name}")
+                            return
+                        if _is_no_routing_target(tgt_bus):
+                            # remove all loopbacks for this input source
+                            pa.cleanup_wrong_loopbacks_for_source(source_name, "__none__")
+                            self.refresh_all()
+                            return
+                        if not pa.sink_exists(tgt_bus):
+                            self._show_message("Input route error", f"Target bus not found\n{tgt_bus}")
+                            return
+
+                        pa.cleanup_wrong_loopbacks_for_source(source_name, tgt_bus)
+                        if not pa.loopback_exists(source_name, tgt_bus):
+                            pa.load_loopback(source_name, tgt_bus, latency_msec=30)
+
+                        # verify loopback exists after action
+                        if not pa.loopback_exists(source_name, tgt_bus):
+                            self._show_message("Input route warning", f"Could not create loopback\n{source_name} -> {tgt_bus}")
+                    except Exception as exc:
+                        self._show_message("Input route error", str(exc))
+                    self.refresh_all()
+
+                btn_move = Gtk.Button(label="Route to Bus")
+                btn_move.set_size_request(110, -1)
+                self.mic_move_group.add_widget(btn_move)
+                btn_move.connect("clicked", on_move)
+                box.append(dd)
+                box.append(btn_move)
+
+                btn_rule = Gtk.Button(label=("Delete Rule" if has_rule else "Add Rule"))
+                btn_rule.set_size_request(110, -1)
+                self.mic_rule_group.add_widget(btn_rule)
+                if has_rule:
+                    btn_rule.add_css_class("suggested-action")
+
+                def on_rule_toggle(_btn, dropdown=dd, source_name=source_name, has_rule=has_rule):
+                    cfg = load_config()
+                    cfg.setdefault("input_routes", [])
+
+                    if has_rule:
+                        cfg["input_routes"] = [r for r in cfg["input_routes"] if str(r.get("source", "")).strip() != source_name]
+                        save_config(cfg)
+                        apply_once()
+                        self.refresh_all()
+                        return
+
+                    target = input_targets[dropdown.get_selected()]
+                    cfg["input_routes"] = [r for r in cfg["input_routes"] if str(r.get("source", "")).strip() != source_name]
+                    if not _is_no_routing_target(target):
+                        cfg["input_routes"].append({"source": source_name, "target_bus": target})
+                    save_config(cfg)
+                    apply_once()
+                    self.refresh_all()
+
+                btn_rule.connect("clicked", on_rule_toggle)
+                box.append(btn_rule)
+
+            self.mic_stream_list.append(row)
+
+        return len(sources)
+
     def refresh_streams(self):
         for child in list(self.stream_list):
             self.stream_list.remove(child)
@@ -476,12 +850,7 @@ class MainWindow(Adw.ApplicationWindow):
         inputs = pa.list_sink_inputs()
 
         # Filter loopbacks (routing internals)
-        filtered = []
-        for i in inputs:
-            props = i.get("props", {})
-            if not props or not is_internal_loopback(i):
-                filtered.append(i)
-        inputs = filtered
+        inputs = [i for i in inputs if (not i.get("props", {})) or not is_internal_loopback(i)]
 
         if not inputs:
             row = Gtk.ListBoxRow()
@@ -496,6 +865,7 @@ class MainWindow(Adw.ApplicationWindow):
             return 0
 
         buses = [b["name"] for b in self.cfg.get("buses", [])]
+        app_targets = list(buses)
         rules = self.cfg.get("rules", [])
 
         # Map sink_id -> sink_name
@@ -520,8 +890,8 @@ class MainWindow(Adw.ApplicationWindow):
             label.set_hexpand(True)
             box.append(label)
 
-            if buses:
-                dd = Gtk.DropDown.new_from_strings(buses)
+            if app_targets:
+                dd = Gtk.DropDown.new_from_strings(app_targets)
                 dd.set_size_request(170, -1)
                 self.stream_target_group.add_widget(dd)
 
@@ -530,15 +900,15 @@ class MainWindow(Adw.ApplicationWindow):
                 cur_sink_name = sink_id_to_name.get(cur_sink_id, "")
 
                 # If the stream is currently on one of our buses, select that bus in dropdown
-                if cur_sink_name in buses:
-                    dd.set_selected(buses.index(cur_sink_name))
+                if cur_sink_name in app_targets:
+                    dd.set_selected(app_targets.index(cur_sink_name))
                 else:
-                    # otherwise default to first bus (or keep 0)
+                    # default to first available bus
                     dd.set_selected(0)
 
 
                 def on_move(_btn, sink_input_id=sid, dropdown=dd):
-                    tgt = buses[dropdown.get_selected()]
+                    tgt = app_targets[dropdown.get_selected()]
                     try:
                         pa.move_sink_input(sink_input_id, tgt)
                     except Exception:
@@ -560,8 +930,9 @@ class MainWindow(Adw.ApplicationWindow):
                 # If rule exists: preselect its target bus in the dropdown
                 if has_rule:
                     target_bus = rules[rule_idx].get("target_bus")
-                    if target_bus in buses:
-                        dd.set_selected(buses.index(target_bus))
+                    target_bus_norm = str(target_bus)
+                    if target_bus_norm in app_targets:
+                        dd.set_selected(app_targets.index(target_bus_norm))
 
                 btn_rule = Gtk.Button(label=("Delete Rule" if has_rule else "Add Rule"))
                 btn_rule.set_size_request(110, -1)
@@ -585,7 +956,7 @@ class MainWindow(Adw.ApplicationWindow):
                         return
 
                     # add rule
-                    target = buses[dropdown.get_selected()]
+                    target = app_targets[dropdown.get_selected()]
                     cfg["rules"].append({"match": match, "target_bus": target})
                     save_config(cfg)
                     apply_once()

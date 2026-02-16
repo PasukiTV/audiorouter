@@ -1,0 +1,30 @@
+app-id: de.pasuki.audiorouter
+runtime: org.gnome.Platform
+runtime-version: "49"
+sdk: org.gnome.Sdk
+command: audiorouter
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  - --filesystem=xdg-config/autostart:rw
+  - --talk-name=org.freedesktop.Flatpak
+  - --env=GTK_A11Y=none
+
+modules:
+  - name: audiorouter
+    buildsystem: simple
+    build-commands:
+      - PIP_USE_PEP517=0 pip3 install --no-deps --no-build-isolation --prefix=/app .
+      - install -Dm644 data/de.pasuki.audiorouter.desktop /app/share/applications/de.pasuki.audiorouter.desktop
+      - install -Dm644 data/de.pasuki.audiorouter.metainfo.xml /app/share/metainfo/de.pasuki.audiorouter.metainfo.xml
+      - install -Dm644 data/de.pasuki.audiorouter.svg /app/share/icons/hicolor/scalable/apps/de.pasuki.audiorouter.svg
+    sources:
+      - type: git
+        url: https://github.com/PasukiTV/audiorouter.git
+        # Update both fields for each release submission to Flathub
+        tag: v0.1.0
+        commit: 0000000000000000000000000000000000000000
