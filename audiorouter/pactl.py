@@ -80,6 +80,29 @@ def list_sink_descriptions() -> Dict[str, str]:
 
     return mapping
 
+
+
+def list_source_descriptions() -> Dict[str, str]:
+    out = try_pactl("list", "sources")
+    mapping: Dict[str, str] = {}
+    cur_name = ""
+
+    for raw in out.splitlines():
+        line = raw.strip()
+
+        if line.startswith("Name:"):
+            cur_name = line.split(":", 1)[1].strip()
+            if cur_name and cur_name not in mapping:
+                mapping[cur_name] = cur_name
+            continue
+
+        if line.startswith("Description:") or line.startswith("Beschreibung:"):
+            desc = line.split(":", 1)[1].strip()
+            if cur_name and desc:
+                mapping[cur_name] = desc
+
+    return mapping
+
 def list_sources() -> List[Dict[str, str]]:
     out = try_pactl("list", "short", "sources")
     srcs = []

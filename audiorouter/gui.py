@@ -232,7 +232,7 @@ class MainWindow(Adw.ApplicationWindow):
         streams_scroll.set_child(self.stream_list)
         right.append(streams_scroll)
 
-        mic_title = Gtk.Label(label="Running input devices", xalign=0)
+        mic_title = Gtk.Label(label="Running input devices (OBS/Discord ready)", xalign=0)
         mic_title.add_css_class("title-3")
         right.append(mic_title)
 
@@ -727,6 +727,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         buses = [b["name"] for b in self.cfg.get("buses", [])]
         input_routes = self.cfg.get("input_routes", [])
+        source_desc = pa.list_source_descriptions()
 
         for src in sources:
             row = Gtk.ListBoxRow()
@@ -737,8 +738,11 @@ class MainWindow(Adw.ApplicationWindow):
             source_name = str(src.get("name", ""))
             sid = str(src.get("id", ""))
 
-            label = Gtk.Label(label=f"#{sid}  {source_name}", xalign=0)
+            friendly = source_desc.get(source_name, source_name)
+            label = Gtk.Label(label=f"#{sid}  {friendly}\n{source_name}", xalign=0)
             label.set_hexpand(True)
+            label.set_wrap(True)
+            label.set_tooltip_text(source_name)
             box.append(label)
 
             if buses:
@@ -760,12 +764,10 @@ class MainWindow(Adw.ApplicationWindow):
                 def on_move(_btn, source_name=source_name, dropdown=dd):
                     tgt_bus = buses[dropdown.get_selected()]
                     try:
-                        cfg = load_config()
-                        cfg.setdefault("input_routes", [])
-                        cfg["input_routes"] = [r for r in cfg["input_routes"] if str(r.get("source", "")).strip() != source_name]
-                        cfg["input_routes"].append({"source": source_name, "target_bus": tgt_bus})
-                        save_config(cfg)
-                        apply_once()
+                        # transient move only: do not create/update persistent Add Rule entries
+                        pa.cleanup_wrong_loopbacks_for_source(source_name, tgt_bus)
+                        if not pa.loopback_exists(source_name, tgt_bus):
+                            pa.load_loopback(source_name, tgt_bus, latency_msec=30)
                     except Exception:
                         pass
                     self.refresh_all()
