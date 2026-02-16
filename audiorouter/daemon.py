@@ -117,6 +117,31 @@ def _is_new_sink_input_event_line(line: str) -> bool:
     return "on sink-input" in txt and "'new'" in txt
 
 
+def _is_new_pulsectl_event(ev) -> bool:
+    """
+    pulsectl event types are backend/version dependent.
+    Depending on platform this may be an enum, string-like enum repr,
+    or an int value. Normalize defensively so "new" events are recognized.
+    """
+    t = getattr(ev, "t", "")
+
+    # Common case: enum-like object with a name attribute
+    name = getattr(t, "name", None)
+    if isinstance(name, str) and name.lower() == "new":
+        return True
+
+    # String/enum repr variants, e.g. "new", "PulseEventTypeEnum.new"
+    txt = str(t).strip().lower()
+    if txt == "new" or txt.endswith(".new"):
+        return True
+
+    # Fallback for int-like values (libpulse PA_SUBSCRIPTION_EVENT_NEW == 0x0000)
+    try:
+        return int(t) == 0
+    except Exception:
+        return False
+
+
 def run_daemon():
     trace("daemon_start")
 
@@ -155,8 +180,7 @@ def run_daemon():
                 def cb(_ev):
                     nonlocal last
 
-                    ev_type = str(getattr(_ev, "t", "")).lower()
-                    if ev_type == "new":
+                    if _is_new_pulsectl_event(_ev):
                         _run_apply_once("pulsectl:new")
                         return
 
