@@ -226,12 +226,23 @@ def apply_once() -> None:
     st.setdefault("bus_modules", {})     # bus_name -> module_id (null-sink)
     st.setdefault("route_modules", {})   # bus_name -> module_id (loopback) (optional)
     st.setdefault("route_target", {})    # bus_name -> last target sink
+    st.setdefault("input_route_modules", {})  # source_name -> module_id
+    st.setdefault("input_route_target", {})   # source_name -> target sink
 
     buses = cfg.get("buses", [])
     rules = cfg.get("rules", [])
     mic_routes = cfg.get("mic_routes", [])
+    input_routes = cfg.get("input_routes", [])
 
     current_bus_names = {b["name"] for b in buses}
+    wanted_input_sources = {str(r.get("source", "")).strip() for r in input_routes if str(r.get("source", "")).strip()}
+
+    # cleanup stale input-route state entries
+    for source_name in list(st["input_route_modules"].keys()):
+        if source_name not in wanted_input_sources:
+            pa.unload_module(st["input_route_modules"][source_name])
+            st["input_route_modules"].pop(source_name, None)
+            st["input_route_target"].pop(source_name, None)
 
     # ---------------------------------------------------------
     # 1) Cleanup removed buses
@@ -332,14 +343,51 @@ def apply_once() -> None:
         st["route_target"][name] = target
 
     # ---------------------------------------------------------
-    # 4) Ensure policy modules for role-based placement
+    # 4) Apply input device routes (source -> bus sink)
+    # ---------------------------------------------------------
+    for r in input_routes:
+        source_name = str(r.get("source", "")).strip()
+        tgt_bus = str(r.get("target_bus", "")).strip()
+        if not source_name or not tgt_bus:
+            continue
+        if not pa.source_exists(source_name) or not pa.sink_exists(tgt_bus):
+            continue
+
+        # avoid routing monitor sources or self-like targets
+        if source_name.endswith(".monitor"):
+            continue
+
+        if pa.loopback_exists(source_name, tgt_bus):
+            st["input_route_target"][source_name] = tgt_bus
+            pa.cleanup_wrong_loopbacks_for_source(source_name, tgt_bus)
+            continue
+
+        prev_mod = str(st["input_route_modules"].get(source_name, "") or "")
+        prev_target = str(st["input_route_target"].get(source_name, "") or "")
+
+        if prev_mod and prev_target != tgt_bus:
+            pa.unload_module(prev_mod)
+
+        new_mod = ""
+        try:
+            pa.cleanup_wrong_loopbacks_for_source(source_name, tgt_bus)
+            new_mod = pa.load_loopback(source_name, tgt_bus, latency_msec=30)
+        except Exception:
+            continue
+
+        st["input_route_modules"][source_name] = new_mod
+        st["input_route_target"][source_name] = tgt_bus
+
+    # ---------------------------------------------------------
+    # 5) Ensure policy modules for role-based placement
+    # ---------------------------------------------------------
     # ---------------------------------------------------------
     # Needed so streams with media.role=event/notification are opened
     # directly on sinks that advertise matching device.intended_roles.
     pa.ensure_module_loaded("module-intended-roles")
 
     # ---------------------------------------------------------
-    # 5) Apply stream rules
+    # 6) Apply stream rules
     # ---------------------------------------------------------
     inputs = pa.list_sink_inputs()
 
@@ -390,7 +438,7 @@ def apply_once() -> None:
                 pass
 
     # ---------------------------------------------------------
-    # 6) Apply microphone (source-output) routes
+    # 7) Apply microphone (source-output) routes
     # ---------------------------------------------------------
     if mic_routes:
         outs = pa.list_source_outputs()

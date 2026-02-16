@@ -232,13 +232,13 @@ class MainWindow(Adw.ApplicationWindow):
         streams_scroll.set_child(self.stream_list)
         right.append(streams_scroll)
 
-        mic_title = Gtk.Label(label="Running microphone streams", xalign=0)
+        mic_title = Gtk.Label(label="Running input devices", xalign=0)
         mic_title.add_css_class("title-3")
         right.append(mic_title)
 
         mic_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
                              margin_top=2, margin_bottom=2, margin_start=0, margin_end=6)
-        hdr_mic_stream = Gtk.Label(label="Microphone stream", xalign=0)
+        hdr_mic_stream = Gtk.Label(label="Input device", xalign=0)
         hdr_mic_stream.set_hexpand(True)
         hdr_mic_stream.add_css_class("dim-label")
         hdr_mic_target = Gtk.Label(label="Target bus", xalign=0)
@@ -704,18 +704,9 @@ class MainWindow(Adw.ApplicationWindow):
         return -1
  
  
-    def _mic_match_obj(self, app: str, binary: str, app_id: str) -> dict:
-        if binary:
-            return {"binary": binary}
-        if app_id:
-            return {"app_id": app_id}
-        if app and app != "Unknown":
-            return {"app": app}
-        return {}
-
-    def _find_mic_rule_index(self, rules: list, match: dict) -> int:
+    def _find_input_rule_index(self, rules: list, source_name: str) -> int:
         for idx, r in enumerate(rules):
-            if r.get("match") == match:
+            if str(r.get("source", "")).strip() == source_name:
                 return idx
         return -1
 
@@ -723,36 +714,30 @@ class MainWindow(Adw.ApplicationWindow):
         for child in list(self.mic_stream_list):
             self.mic_stream_list.remove(child)
 
-        outs = pa.list_source_outputs()
-        outs = [o for o in outs if (not o.get("props", {})) or not is_internal_loopback(o)]
+        sources = [s for s in pa.list_sources() if not s.get("name", "").endswith(".monitor")]
 
-        if not outs:
+        if not sources:
             row = Gtk.ListBoxRow()
             box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
                           margin_top=6, margin_bottom=6, margin_start=6, margin_end=6)
             row.set_child(box)
-            box.append(Gtk.Label(label="Keine aktiven Mikrofon-Streams.", xalign=0))
+            box.append(Gtk.Label(label="Keine Eingabegeräte gefunden.", xalign=0))
             self.mic_stream_list.append(row)
             return 0
 
         buses = [b["name"] for b in self.cfg.get("buses", [])]
-        mic_rules = self.cfg.get("mic_routes", [])
-        source_id_to_name = {s["id"]: s["name"] for s in pa.list_sources()}
+        input_routes = self.cfg.get("input_routes", [])
 
-        for out in outs:
+        for src in sources:
             row = Gtk.ListBoxRow()
             box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
                           margin_top=6, margin_bottom=6, margin_start=6, margin_end=6)
             row.set_child(box)
 
-            props = out.get("props", {})
-            app = props.get("application.name") or props.get("pipewire.access.portal.app_id") or "Unknown"
-            app_id = props.get("pipewire.access.portal.app_id") or ""
-            binary = props.get("application.process.binary") or ""
-            media = props.get("media.name") or "capture"
-            oid = str(out.get("id"))
+            source_name = str(src.get("name", ""))
+            sid = str(src.get("id", ""))
 
-            label = Gtk.Label(label=f"#{oid}  {app}  ({binary or '?'}) — {media}", xalign=0)
+            label = Gtk.Label(label=f"#{sid}  {source_name}", xalign=0)
             label.set_hexpand(True)
             box.append(label)
 
@@ -761,39 +746,36 @@ class MainWindow(Adw.ApplicationWindow):
                 dd.set_size_request(170, -1)
                 self.mic_target_group.add_widget(dd)
 
-                cur_source_id = str(out.get("source_id", ""))
-                cur_source_name = source_id_to_name.get(cur_source_id, "")
-                cur_bus = ""
-                if cur_source_name.endswith('.monitor'):
-                    cur_bus = cur_source_name[:-len('.monitor')]
-                if cur_bus in buses:
-                    dd.set_selected(buses.index(cur_bus))
+                rule_idx = self._find_input_rule_index(input_routes, source_name)
+                has_rule = rule_idx >= 0
+                if has_rule:
+                    target_bus = input_routes[rule_idx].get("target_bus")
+                    if target_bus in buses:
+                        dd.set_selected(buses.index(target_bus))
+                    else:
+                        dd.set_selected(0)
                 else:
                     dd.set_selected(0)
 
-                def on_move(_btn, source_output_id=oid, dropdown=dd):
+                def on_move(_btn, source_name=source_name, dropdown=dd):
                     tgt_bus = buses[dropdown.get_selected()]
-                    tgt_source = f"{tgt_bus}.monitor"
                     try:
-                        pa.move_source_output(source_output_id, tgt_source)
+                        cfg = load_config()
+                        cfg.setdefault("input_routes", [])
+                        cfg["input_routes"] = [r for r in cfg["input_routes"] if str(r.get("source", "")).strip() != source_name]
+                        cfg["input_routes"].append({"source": source_name, "target_bus": tgt_bus})
+                        save_config(cfg)
+                        apply_once()
                     except Exception:
                         pass
                     self.refresh_all()
 
-                btn_move = Gtk.Button(label="Move to Bus")
+                btn_move = Gtk.Button(label="Route to Bus")
                 btn_move.set_size_request(110, -1)
                 self.mic_move_group.add_widget(btn_move)
                 btn_move.connect("clicked", on_move)
                 box.append(dd)
                 box.append(btn_move)
-
-                match = self._mic_match_obj(app, binary, app_id)
-                rule_idx = self._find_mic_rule_index(mic_rules, match) if match else -1
-                has_rule = rule_idx >= 0
-                if has_rule:
-                    target_bus = mic_rules[rule_idx].get("target_bus")
-                    if target_bus in buses:
-                        dd.set_selected(buses.index(target_bus))
 
                 btn_rule = Gtk.Button(label=("Delete Rule" if has_rule else "Add Rule"))
                 btn_rule.set_size_request(110, -1)
@@ -801,21 +783,20 @@ class MainWindow(Adw.ApplicationWindow):
                 if has_rule:
                     btn_rule.add_css_class("suggested-action")
 
-                def on_rule_toggle(_btn, dropdown=dd, match=match, has_rule=has_rule):
-                    if not match:
-                        return
+                def on_rule_toggle(_btn, dropdown=dd, source_name=source_name, has_rule=has_rule):
                     cfg = load_config()
-                    cfg.setdefault("mic_routes", [])
+                    cfg.setdefault("input_routes", [])
 
                     if has_rule:
-                        cfg["mic_routes"] = [r for r in cfg["mic_routes"] if r.get("match") != match]
+                        cfg["input_routes"] = [r for r in cfg["input_routes"] if str(r.get("source", "")).strip() != source_name]
                         save_config(cfg)
                         apply_once()
                         self.refresh_all()
                         return
 
                     target = buses[dropdown.get_selected()]
-                    cfg["mic_routes"].append({"match": match, "target_bus": target})
+                    cfg["input_routes"] = [r for r in cfg["input_routes"] if str(r.get("source", "")).strip() != source_name]
+                    cfg["input_routes"].append({"source": source_name, "target_bus": target})
                     save_config(cfg)
                     apply_once()
                     self.refresh_all()
@@ -825,7 +806,7 @@ class MainWindow(Adw.ApplicationWindow):
 
             self.mic_stream_list.append(row)
 
-        return len(outs)
+        return len(sources)
 
     def refresh_streams(self):
         for child in list(self.stream_list):

@@ -21,6 +21,7 @@ DEFAULT_CONFIG = {
     "buses": [],
     "rules": [],
     "mic_routes": [],
+    "input_routes": [],
 }
 
 
@@ -49,6 +50,7 @@ def load_config() -> Dict[str, Any]:
             "buses": _read_json(VSINKS_PATH, []),
             "rules": _read_json(RULES_PATH, []),
             "mic_routes": legacy.get("mic_routes", []) if isinstance(legacy, dict) else [],
+            "input_routes": legacy.get("input_routes", []) if isinstance(legacy, dict) else [],
         }
         save_config(cfg)
         return cfg
@@ -59,6 +61,7 @@ def load_config() -> Dict[str, Any]:
         cfg.setdefault("buses", [])
         cfg.setdefault("rules", [])
         cfg.setdefault("mic_routes", [])
+        cfg.setdefault("input_routes", [])
         save_config(cfg)
         return cfg
 
@@ -73,6 +76,7 @@ def save_config(cfg: Dict[str, Any]) -> None:
         "buses": cfg.get("buses", []),
         "rules": cfg.get("rules", []),
         "mic_routes": cfg.get("mic_routes", []),
+        "input_routes": cfg.get("input_routes", []),
     }
 
     # Keep both split files and legacy config in sync.
