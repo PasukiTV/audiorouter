@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import time
+
+VIRTUAL_SWITCH_MUTE_SEC = 0.12
+PHYSICAL_SWITCH_MUTE_SEC = 0.05
+
 """
 Core logic for audiorouter.
 
@@ -10,6 +15,7 @@ Fixes:
 - No self loops
 - No duplicate loopbacks (no create/delete loop)
 - Only removes wrong loopbacks (same source, different sink)
+- Route handover mutes bus sink + loopback sink-input to reduce switch artifacts
 """
 
 from .config import load_config, load_state, save_state
@@ -73,8 +79,6 @@ def apply_once() -> None:
     # ---------------------------------------------------------
     # 3) Routing logic (NO LOOPBACK CHURN)
     # ---------------------------------------------------------
-    bus_names = {b["name"] for b in buses}
-
     for b in buses:
         name = b["name"]
         route_to = b.get("route_to", "default")
@@ -101,11 +105,43 @@ def apply_once() -> None:
             pa.cleanup_wrong_loopbacks_for_source(monitor, target)
             continue
 
-        # Remove only WRONG loopbacks (same source, different sink)
-        pa.cleanup_wrong_loopbacks_for_source(monitor, target)
+        prev_target = st["route_target"].get(name, "")
+        prev_mod = str(st["route_modules"].get(name, "") or "")
+        involves_virtual = target.startswith("vsink.") or str(prev_target).startswith("vsink.")
 
-        # Create loopback
-        new_mod = pa.load_loopback(monitor, target, latency_msec=30)
+        # Mute the bus sink itself (not only the monitor source) to avoid audible pops
+        # while loopback modules are recreated. Also mute sink-inputs owned by the old
+        # loopback module when we can resolve them.
+        prev_inputs = pa.sink_inputs_for_owner_module(prev_mod)
+        pa.set_sink_mute(name, True)
+        pa.set_source_mute(monitor, True)
+        for sid in prev_inputs:
+            pa.set_sink_input_mute(sid, True)
+
+        new_mod = ""
+        try:
+            if involves_virtual:
+                # For virtual-bus handover use break-before-make while muted to avoid
+                # comb/feedback-like artifacts when jumping between vsinks.
+                pa.cleanup_wrong_loopbacks_for_source(monitor, target)
+                time.sleep(0.02)
+                new_mod = pa.load_loopback(monitor, target, latency_msec=30)
+                time.sleep(VIRTUAL_SWITCH_MUTE_SEC)
+            else:
+                # For physical outputs keep make-before-break and a shorter mute window.
+                new_mod = pa.load_loopback(monitor, target, latency_msec=30)
+                pa.cleanup_wrong_loopbacks_for_source(monitor, target)
+                time.sleep(PHYSICAL_SWITCH_MUTE_SEC)
+        finally:
+            # Ensure we never leave loopback inputs muted after the transition.
+            for sid in prev_inputs:
+                pa.set_sink_input_mute(sid, False)
+            if new_mod:
+                for sid in pa.sink_inputs_for_owner_module(new_mod):
+                    pa.set_sink_input_mute(sid, False)
+            pa.set_source_mute(monitor, False)
+            pa.set_sink_mute(name, False)
+
         st["route_modules"][name] = new_mod
         st["route_target"][name] = target
 

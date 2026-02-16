@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
+import threading
+from pathlib import Path
+
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw
+from gi.repository import Gtk, Adw, Pango, GLib
 
-from . autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
+from .autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
 
 
-from .config import load_config, save_config
+from .config import RULES_PATH, VSINKS_PATH, load_config, save_config
 from . import pactl as pa
 # Apply changes immediately (no "Apply" button)
 from .core import apply_once
@@ -19,6 +23,7 @@ APP_ID = "de.pasuki.audiorouter"
 import re
 
 DONATE_URL = "https://www.paypal.me/audiorouter"
+
 
 def open_donate(_btn):
     launcher = Gtk.UriLauncher.new(DONATE_URL)
@@ -43,19 +48,37 @@ def make_bus_name(label: str, existing_names: set[str]) -> str:
 
 def friendly_sink_list():
     sinks = pa.list_sinks()
+    descriptions = pa.list_sink_descriptions()
     items = [("default", "Default (current default sink)")]
     for s in sinks:
-        items.append((s["name"], s["name"]))
+        name = s["name"]
+        items.append((name, descriptions.get(name, name)))
     return items
+
+
+def is_internal_loopback(inp: dict) -> bool:
+    props = inp.get("props", {})
+    media = (props.get("media.name") or "").lower()
+    nodeg = (props.get("node.group") or "").lower()
+    noden = (props.get("node.name") or "").lower()
+    return ("loopback" in media) or ("loopback" in nodeg) or (".loopback" in noden)
 
 
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application):
         super().__init__(application=app)
         self.set_title("audiorouter")
-        self.set_default_size(980, 620)
+        self.set_default_size(1180, 720)
+        self.set_size_request(980, 620)
 
         self.cfg = load_config()
+        self._apply_running = False
+        self._apply_queued = False
+        self._apply_refresh_requested = False
+
+        self.stream_target_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        self.stream_move_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        self.stream_rule_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
                        margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
@@ -76,21 +99,73 @@ class MainWindow(Adw.ApplicationWindow):
         self.autostart_check.connect("toggled", self.on_autostart_toggled)
         root.append(self.autostart_check)
 
+        file_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_open_rules = Gtk.Button(label="Open Routing Rules")
+        btn_open_rules.connect("clicked", lambda *_: self.open_json_editor(RULES_PATH, "Routing Rules"))
+        btn_open_vsinks = Gtk.Button(label="Open vSinks")
+        btn_open_vsinks.connect("clicked", lambda *_: self.open_json_editor(VSINKS_PATH, "vSinks"))
+        btn_debug = Gtk.Button(label="Audio Debug Snapshot")
+        btn_debug.connect("clicked", lambda *_: self.open_debug_snapshot())
+        file_buttons.append(btn_open_rules)
+        file_buttons.append(btn_open_vsinks)
+        file_buttons.append(btn_debug)
+        root.append(file_buttons)
+
+        # Lightweight status row (updates only on refresh)
+        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self.status_pipewire = Gtk.Label(xalign=0)
+        self.status_default_sink = Gtk.Label(xalign=0)
+        self.status_daemon = Gtk.Label(xalign=0)
+        self.status_streams = Gtk.Label(xalign=0)
+        for lbl in (self.status_pipewire, self.status_default_sink, self.status_daemon, self.status_streams):
+            lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            lbl.set_max_width_chars(42)
+        status_row.append(self.status_pipewire)
+        status_row.append(self.status_default_sink)
+        status_row.append(self.status_daemon)
+        status_row.append(self.status_streams)
+        root.append(status_row)
 
         btn_refresh = Gtk.Button(label="Refresh")
         btn_refresh.connect("clicked", lambda *_: self.refresh_all())
         header.pack_end(btn_refresh)
 
         split = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
+        split.set_position(560)
+        split.set_resize_start_child(True)
+        split.set_shrink_start_child(False)
+        split.set_shrink_end_child(False)
         root.append(split)
 
         # LEFT: buses
         left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        left.set_size_request(500, -1)
         split.set_start_child(left)
 
         left_title = Gtk.Label(label="Buses (virtual sinks)", xalign=0)
         left_title.add_css_class("title-3")
         left.append(left_title)
+
+        bus_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
+                             margin_top=2, margin_bottom=2, margin_start=6, margin_end=6)
+        hdr_name = Gtk.Label(label="Technical sink", xalign=0)
+        hdr_name.set_width_chars(20)
+        hdr_name.add_css_class("dim-label")
+        hdr_label = Gtk.Label(label="Label", xalign=0)
+        hdr_label.set_width_chars(10)
+        hdr_label.add_css_class("dim-label")
+        hdr_route = Gtk.Label(label="Route target", xalign=0)
+        hdr_route.set_hexpand(True)
+        hdr_route.set_margin_start(4)
+        hdr_route.add_css_class("dim-label")
+        hdr_action = Gtk.Label(label="Action", xalign=0)
+        hdr_action.set_size_request(110, -1)
+        hdr_action.add_css_class("dim-label")
+        bus_header.append(hdr_name)
+        bus_header.append(hdr_label)
+        bus_header.append(hdr_route)
+        bus_header.append(hdr_action)
+        left.append(bus_header)
 
         self.bus_list = Gtk.ListBox()
         self.bus_list.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -113,6 +188,29 @@ class MainWindow(Adw.ApplicationWindow):
         right_title.add_css_class("title-3")
         right.append(right_title)
 
+        streams_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
+                                 margin_top=2, margin_bottom=2, margin_start=0, margin_end=6)
+        hdr_stream = Gtk.Label(label="Stream", xalign=0)
+        hdr_stream.set_hexpand(True)
+        hdr_stream.add_css_class("dim-label")
+        hdr_target = Gtk.Label(label="Target bus", xalign=0)
+        hdr_target.set_halign(Gtk.Align.START)
+        hdr_target.add_css_class("dim-label")
+        self.stream_target_group.add_widget(hdr_target)
+        hdr_move = Gtk.Label(label="Move", xalign=0)
+        hdr_move.set_halign(Gtk.Align.START)
+        hdr_move.add_css_class("dim-label")
+        self.stream_move_group.add_widget(hdr_move)
+        hdr_rule = Gtk.Label(label="Rule", xalign=0)
+        hdr_rule.set_halign(Gtk.Align.START)
+        hdr_rule.add_css_class("dim-label")
+        self.stream_rule_group.add_widget(hdr_rule)
+        streams_header.append(hdr_stream)
+        streams_header.append(hdr_target)
+        streams_header.append(hdr_move)
+        streams_header.append(hdr_rule)
+        right.append(streams_header)
+
         self.stream_list = Gtk.ListBox()
         self.stream_list.set_selection_mode(Gtk.SelectionMode.NONE)
         right.append(self.stream_list)
@@ -122,10 +220,125 @@ class MainWindow(Adw.ApplicationWindow):
         self.refresh_all()
 
 
+    def open_json_editor(self, path: Path, title: str):
+        # Ensure config files exist and are synced before opening editor.
+        load_config()
+
+        editor = Gtk.Window(title=f"{title} bearbeiten")
+        editor.set_transient_for(self)
+        editor.set_modal(True)
+        editor.set_default_size(780, 520)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                       margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+        editor.set_child(root)
+
+        root.append(Gtk.Label(label=str(path), xalign=0))
+
+        sw = Gtk.ScrolledWindow()
+        sw.set_vexpand(True)
+        root.append(sw)
+
+        text_view = Gtk.TextView()
+        text_view.set_monospace(True)
+        buffer = text_view.get_buffer()
+
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception:
+            content = "[]"
+        buffer.set_text(content)
+
+        sw.set_child(text_view)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_save = Gtk.Button(label="Save")
+        btn_close = Gtk.Button(label="Close")
+        actions.append(btn_save)
+        actions.append(btn_close)
+        root.append(actions)
+
+        def on_save(_btn):
+            start = buffer.get_start_iter()
+            end = buffer.get_end_iter()
+            new_text = buffer.get_text(start, end, True)
+            try:
+                path.write_text(new_text, encoding="utf-8")
+                # reload + sync legacy config.json and in-memory cfg
+                self.cfg = load_config()
+                self.refresh_all()
+            except Exception:
+                pass
+
+        btn_save.connect("clicked", on_save)
+        btn_close.connect("clicked", lambda *_: editor.close())
+
+        editor.present()
+
+    def open_debug_snapshot(self):
+        editor = Gtk.Window(title="Audio debug snapshot")
+        editor.set_transient_for(self)
+        editor.set_modal(True)
+        editor.set_default_size(840, 560)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                       margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+        editor.set_child(root)
+
+        help_lbl = Gtk.Label(
+            label="Share this snapshot when noise appears during routing switch."
+                  " It contains pactl state (sinks/sources/modules/inputs).",
+            xalign=0
+        )
+        help_lbl.set_wrap(True)
+        root.append(help_lbl)
+
+        sw = Gtk.ScrolledWindow()
+        sw.set_vexpand(True)
+        root.append(sw)
+
+        text_view = Gtk.TextView()
+        text_view.set_editable(False)
+        text_view.set_monospace(True)
+        buffer = text_view.get_buffer()
+        buffer.set_text(pa.collect_debug_snapshot())
+        sw.set_child(text_view)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_copy = Gtk.Button(label="Copy")
+        btn_save = Gtk.Button(label="Save to file")
+        btn_close = Gtk.Button(label="Close")
+        actions.append(btn_copy)
+        actions.append(btn_save)
+        actions.append(btn_close)
+        root.append(actions)
+
+        def _current_text() -> str:
+            start = buffer.get_start_iter()
+            end = buffer.get_end_iter()
+            return buffer.get_text(start, end, True)
+
+        def on_copy(_btn):
+            clip = self.get_clipboard()
+            clip.set(_current_text())
+
+        def on_save(_btn):
+            debug_dir = Path.home() / ".config" / "audiorouter"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            out = debug_dir / "debug-snapshot.txt"
+            out.write_text(_current_text(), encoding="utf-8")
+
+        btn_copy.connect("clicked", on_copy)
+        btn_save.connect("clicked", on_save)
+        btn_close.connect("clicked", lambda *_: editor.close())
+
+        editor.present()
+
     def refresh_all(self):
         self.cfg = load_config()
         self.refresh_buses()
-        self.refresh_streams()
+        stream_count = self.refresh_streams()
+        self.refresh_status(stream_count)
 
     def on_autostart_toggled(self, btn: Gtk.CheckButton):
         state = btn.get_active()
@@ -138,6 +351,44 @@ class MainWindow(Adw.ApplicationWindow):
             print("-> disable()")
             autostart_disable()
 
+
+    def _is_pid_alive(self, pid: int) -> bool:
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+
+    def _daemon_running(self) -> bool:
+        lock_file = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "audiorouter-daemon.lock"
+        if not lock_file.exists():
+            return False
+        try:
+            pid = int(lock_file.read_text(encoding="utf-8").strip())
+        except Exception:
+            return False
+        return self._is_pid_alive(pid)
+
+    def refresh_status(self, stream_count: int):
+        info = pa.try_pactl("info")
+        pipewire_ok = bool(info.strip())
+
+        if pipewire_ok:
+            default_sink = pa.get_default_sink() or "-"
+            sink_count = len(pa.list_sinks())
+            sink_desc = pa.list_sink_descriptions().get(default_sink, default_sink)
+            self.status_pipewire.set_text(f"PipeWire/Pulse: ✅ bereit ({sink_count} Sinks)")
+            self.status_default_sink.set_text(f"Default Sink: {sink_desc}")
+        else:
+            self.status_pipewire.set_text("PipeWire/Pulse: ❌ nicht erreichbar")
+            self.status_default_sink.set_text("Default Sink: -")
+
+        self.status_daemon.set_text(f"Daemon: {'✅ läuft' if self._daemon_running() else '⚠️ gestoppt'}")
+        self.status_streams.set_text(f"Aktive Streams: {stream_count}")
 
     def refresh_buses(self):
         for child in list(self.bus_list):
@@ -164,14 +415,19 @@ class MainWindow(Adw.ApplicationWindow):
             row.set_child(box)
 
             name_lbl = Gtk.Label(label=b["name"], xalign=0)
-            name_lbl.set_hexpand(True)
+            name_lbl.set_width_chars(20)
+            name_lbl.set_max_width_chars(20)
+            name_lbl.set_ellipsize(Pango.EllipsizeMode.END)
             box.append(name_lbl)
 
             label_lbl = Gtk.Label(label=b.get("label", ""), xalign=0)
-            label_lbl.set_width_chars(12)
+            label_lbl.set_width_chars(10)
+            label_lbl.set_max_width_chars(12)
+            label_lbl.set_ellipsize(Pango.EllipsizeMode.END)
             box.append(label_lbl)
 
             dd = Gtk.DropDown.new_from_strings(sink_labels)
+            dd.set_hexpand(True)
             route_to = b.get("route_to", "default")
             idx = 0
             for i, (val, _) in enumerate(sink_items):
@@ -189,6 +445,7 @@ class MainWindow(Adw.ApplicationWindow):
             box.append(dd)
 
             btn_del = Gtk.Button(label="Delete")
+            btn_del.set_size_request(110, -1)
             btn_del.connect("clicked", lambda *_ , bus=b["name"]: self.delete_bus(bus))
             box.append(btn_del)
 
@@ -218,22 +475,12 @@ class MainWindow(Adw.ApplicationWindow):
 
         inputs = pa.list_sink_inputs()
 
-        def is_internal_loopback(inp):
-            props = inp.get("props", {})
-            media = (props.get("media.name") or "").lower()
-            nodeg = (props.get("node.group") or "").lower()
-            noden = (props.get("node.name") or "").lower()
-            return ("loopback" in media) or ("loopback" in nodeg) or (".loopback" in noden)
-
         # Filter loopbacks (routing internals)
         filtered = []
         for i in inputs:
             props = i.get("props", {})
-            if not props:
+            if not props or not is_internal_loopback(i):
                 filtered.append(i)
-            else:
-                if not is_internal_loopback(i):
-                    filtered.append(i)
         inputs = filtered
 
         if not inputs:
@@ -246,9 +493,10 @@ class MainWindow(Adw.ApplicationWindow):
                 xalign=0
             ))
             self.stream_list.append(row)
-            return
+            return 0
 
         buses = [b["name"] for b in self.cfg.get("buses", [])]
+        rules = self.cfg.get("rules", [])
 
         # Map sink_id -> sink_name
         sink_id_to_name = {s["id"]: s["name"] for s in pa.list_sinks()}
@@ -274,6 +522,8 @@ class MainWindow(Adw.ApplicationWindow):
 
             if buses:
                 dd = Gtk.DropDown.new_from_strings(buses)
+                dd.set_size_request(170, -1)
+                self.stream_target_group.add_widget(dd)
 
                 # Prefer: actual current sink of this stream (sink_id)
                 cur_sink_id = str(inp.get("sink_id", ""))
@@ -293,17 +543,16 @@ class MainWindow(Adw.ApplicationWindow):
                         pa.move_sink_input(sink_input_id, tgt)
                     except Exception:
                         pass
-                    self.refresh_streams()
+                    self.refresh_all()
 
                 btn_move = Gtk.Button(label="Move to Bus")
+                btn_move.set_size_request(110, -1)
+                self.stream_move_group.add_widget(btn_move)
                 btn_move.connect("clicked", on_move)
                 box.append(dd)
                 box.append(btn_move)
 
-                                # --- Rule UI (Add / Delete toggle) ---
-                cfg_now = load_config()
-                rules = cfg_now.get("rules", [])
-
+                # --- Rule UI (Add / Delete toggle) ---
                 match = self._stream_match_obj(app, binary, app_id)
                 rule_idx = self._find_rule_index(rules, match) if match else -1
                 has_rule = rule_idx >= 0
@@ -315,6 +564,8 @@ class MainWindow(Adw.ApplicationWindow):
                         dd.set_selected(buses.index(target_bus))
 
                 btn_rule = Gtk.Button(label=("Delete Rule" if has_rule else "Add Rule"))
+                btn_rule.set_size_request(110, -1)
+                self.stream_rule_group.add_widget(btn_rule)
                 if has_rule:
                     btn_rule.add_css_class("suggested-action")  # visually highlight
 
@@ -346,6 +597,8 @@ class MainWindow(Adw.ApplicationWindow):
 
             self.stream_list.append(row)
 
+        return len(inputs)
+
     def add_bus(self):
         label = self.entry_bus_label.get_text().strip()
         if not label:
@@ -375,13 +628,43 @@ class MainWindow(Adw.ApplicationWindow):
         apply_once()
         self.refresh_all()
 
+    def _apply_once_async(self, refresh_ui: bool = True):
+        # Keep route changes responsive: run potentially slow apply_once() off the GTK main thread.
+        self._apply_refresh_requested = self._apply_refresh_requested or refresh_ui
+        if self._apply_running:
+            self._apply_queued = True
+            return
+
+        self._apply_running = True
+
+        def worker():
+            try:
+                apply_once()
+            finally:
+                def on_done():
+                    self._apply_running = False
+                    do_refresh = self._apply_refresh_requested
+                    self._apply_refresh_requested = False
+                    run_again = self._apply_queued
+                    self._apply_queued = False
+
+                    if do_refresh:
+                        self.refresh_all()
+                    if run_again:
+                        self._apply_once_async(refresh_ui=True)
+                    return False
+
+                GLib.idle_add(on_done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def set_route(self, bus_name: str, route_to: str):
         cfg = load_config()
         for b in cfg.get("buses", []):
             if b["name"] == bus_name:
                 b["route_to"] = route_to
         save_config(cfg)
-        apply_once()
+        self._apply_once_async(refresh_ui=False)
 
 
 class App(Adw.Application):

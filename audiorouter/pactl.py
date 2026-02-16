@@ -26,6 +26,24 @@ def try_pactl(*args: str) -> str:
     return out if rc == 0 else ""
 
 
+def collect_debug_snapshot() -> str:
+    sections = [
+        ("info", ["info"]),
+        ("default_sink", ["get-default-sink"]),
+        ("sinks_short", ["list", "short", "sinks"]),
+        ("sources_short", ["list", "short", "sources"]),
+        ("modules_short", ["list", "short", "modules"]),
+        ("sink_inputs", ["list", "sink-inputs"]),
+    ]
+    blocks = []
+    for title, cmd in sections:
+        blocks.append(f"## {title}")
+        out = try_pactl(*cmd).strip()
+        blocks.append(out or "(no output)")
+        blocks.append("")
+    return "\n".join(blocks)
+
+
 def get_default_sink() -> str:
     return try_pactl("get-default-sink").strip()
 
@@ -37,6 +55,29 @@ def list_sinks() -> List[Dict[str, str]]:
         if len(parts) >= 2:
             sinks.append({"id": parts[0], "name": parts[1]})
     return sinks
+
+
+
+def list_sink_descriptions() -> Dict[str, str]:
+    out = try_pactl("list", "sinks")
+    mapping: Dict[str, str] = {}
+    cur_name = ""
+
+    for raw in out.splitlines():
+        line = raw.strip()
+
+        if line.startswith("Name:"):
+            cur_name = line.split(":", 1)[1].strip()
+            if cur_name and cur_name not in mapping:
+                mapping[cur_name] = cur_name
+            continue
+
+        if line.startswith("Description:") or line.startswith("Beschreibung:"):
+            desc = line.split(":", 1)[1].strip()
+            if cur_name and desc:
+                mapping[cur_name] = desc
+
+    return mapping
 
 def list_sources() -> List[Dict[str, str]]:
     out = try_pactl("list", "short", "sources")
@@ -61,6 +102,20 @@ def sink_exists(name: str) -> bool:
 
 def source_exists(name: str) -> bool:
     return any(s["name"] == name for s in list_sources())
+
+
+
+def set_source_mute(source_name: str, muted: bool) -> None:
+    try_pactl("set-source-mute", source_name, "1" if muted else "0")
+
+
+def set_sink_mute(sink_name: str, muted: bool) -> None:
+    try_pactl("set-sink-mute", sink_name, "1" if muted else "0")
+
+
+def set_sink_input_mute(sink_input_id: str, muted: bool) -> None:
+    try_pactl("set-sink-input-mute", sink_input_id, "1" if muted else "0")
+
 
 def unload_module(module_id: str) -> None:
     if module_id:
@@ -181,6 +236,12 @@ def list_sink_inputs() -> List[Dict[str, Any]]:
             cur["sink_id"] = line.split(":", 1)[1].strip()
             continue
 
+        if line.startswith("Owner Module:") or line.startswith("Besitzer-Modul:"):
+            owner = line.split(":", 1)[1].strip()
+            if owner not in ("n/a", "k. A."):
+                cur["owner_module"] = owner
+            continue
+
         if in_props and "=" in line:
             k, v = line.split("=", 1)
             cur["props"][k.strip()] = v.strip().strip('"')
@@ -189,6 +250,16 @@ def list_sink_inputs() -> List[Dict[str, Any]]:
         items.append(cur)
 
     return items
+
+def sink_inputs_for_owner_module(module_id: str) -> List[str]:
+    if not module_id:
+        return []
+    return [
+        str(i.get("id", ""))
+        for i in list_sink_inputs()
+        if str(i.get("owner_module", "")) == str(module_id)
+    ]
+
 
 def get_physical_default_sink() -> str:
     default = get_default_sink()
