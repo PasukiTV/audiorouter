@@ -97,6 +97,14 @@ def list_modules() -> List[Dict[str, str]]:
             mods.append({"id": parts[0], "name": parts[1], "args": parts[2] if len(parts) > 2 else ""})
     return mods
 
+
+def ensure_module_loaded(module_name: str, *module_args: str) -> None:
+    for m in list_modules():
+        if m.get("name") == module_name:
+            return
+    try_pactl("load-module", module_name, *module_args)
+
+
 def sink_exists(name: str) -> bool:
     return any(s["name"] == name for s in list_sinks())
 
@@ -124,7 +132,8 @@ def tag_system_sink(sink_name: str = "vsink.system") -> None:
     """
     if not sink_exists(sink_name):
         return
-    try_pactl("set-sink-properties", sink_name, "device.intended_roles=event")
+    # include both role names commonly used by Pulse/PipeWire clients
+    try_pactl("set-sink-properties", sink_name, "device.intended_roles=event notification")
 
 
 def unload_module(module_id: str) -> None:

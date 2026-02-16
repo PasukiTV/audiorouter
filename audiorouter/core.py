@@ -206,7 +206,14 @@ def apply_once() -> None:
         st["route_target"][name] = target
 
     # ---------------------------------------------------------
-    # 4) Apply stream rules
+    # 4) Ensure policy modules for role-based placement
+    # ---------------------------------------------------------
+    # Needed so streams with media.role=event/notification are opened
+    # directly on sinks that advertise matching device.intended_roles.
+    pa.ensure_module_loaded("module-intended-roles")
+
+    # ---------------------------------------------------------
+    # 5) Apply stream rules
     # ---------------------------------------------------------
     inputs = pa.list_sink_inputs()
 
