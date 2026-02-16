@@ -111,11 +111,14 @@ class MainWindow(Adw.ApplicationWindow):
         btn_policy_install.connect("clicked", lambda *_: self.install_system_sound_policy())
         btn_policy_remove = Gtk.Button(label="Remove System Sound Policy")
         btn_policy_remove.connect("clicked", lambda *_: self.remove_system_sound_policy())
+        btn_policy_delete_file = Gtk.Button(label="Delete Daemon Rules File")
+        btn_policy_delete_file.connect("clicked", lambda *_: self.delete_daemon_rules_file())
         file_buttons.append(btn_open_rules)
         file_buttons.append(btn_open_vsinks)
         file_buttons.append(btn_debug)
         file_buttons.append(btn_policy_install)
         file_buttons.append(btn_policy_remove)
+        file_buttons.append(btn_policy_delete_file)
         root.append(file_buttons)
 
         # Lightweight status row (updates only on refresh)
@@ -379,6 +382,21 @@ class MainWindow(Adw.ApplicationWindow):
 
     def remove_system_sound_policy(self) -> None:
         self._apply_system_policy_async(False)
+
+    def delete_daemon_rules_file(self) -> None:
+        def _worker():
+            try:
+                path = remove_system_sound_policy()
+                title = "Daemon rules file deleted"
+                msg = f"Deleted file:\n{path}"
+            except Exception as exc:
+                title = "Delete daemon rules file error"
+                msg = str(exc)
+
+            GLib.idle_add(self.refresh_all)
+            GLib.idle_add(self._show_message, title, msg)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def refresh_all(self):
         self.cfg = load_config()
