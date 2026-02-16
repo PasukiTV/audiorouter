@@ -64,16 +64,20 @@ def install_system_sound_policy(target_sink: str = "vsink.system") -> Path:
     content = f"""stream.rules = [
   {{
     matches = [
-      {{ media.role = \"event\" }}
-      {{ media.role = \"notification\" }}
-      {{ media.name = \"bell-window-system\" }}
-      {{ application.name = \"Mutter\" media.name = \"bell-window-system\" }}
-      {{ application.process.binary = \"gnome-shell\" media.name = \"bell-window-system\" }}
+      {{ media.role = "event" }}
+      {{ media.role = "notification" }}
+      {{ media.role = "alarm" }}
+      {{ media.name = "bell-window-system" }}
+      {{ media.name = "~(?i).*(bell|notification|notify|system sound|system sounds|event|alert|benachrichtigung|systemklänge).*" }}
+      {{ application.name = "Mutter" }}
+      {{ application.name = "GNOME Shell" }}
+      {{ application.process.binary = "gnome-shell" }}
+      {{ application.process.binary = "canberra-gtk-play" }}
     ]
     actions = {{
       update-props = {{
-        node.target = \"{target_sink}\"
-        target.object = \"{target_sink}\"
+        node.target = "{target_sink}"
+        target.object = "{target_sink}"
       }}
     }}
   }}
