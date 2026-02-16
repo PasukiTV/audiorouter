@@ -59,12 +59,14 @@ def _remove_file_host(path: Path) -> None:
 def install_system_sound_policy(target_sink: str = "vsink.system") -> Path:
     path = _pipewire_pulse_conf_path()
 
-    # PipeWire pulse stream rules: route event/notification streams at creation time.
-    content = f"""pulse.rules = [
+    # stream.rules is the supported section for per-stream property rewrites.
+    # This applies in pipewire-pulse context to Pulse clients (GNOME bell, etc.).
+    content = f"""stream.rules = [
   {{
     matches = [
       {{ media.role = \"event\" }}
       {{ media.role = \"notification\" }}
+      {{ media.name = \"bell-window-system\" }}
       {{ application.name = \"Mutter\" media.name = \"bell-window-system\" }}
       {{ application.process.binary = \"gnome-shell\" media.name = \"bell-window-system\" }}
     ]
