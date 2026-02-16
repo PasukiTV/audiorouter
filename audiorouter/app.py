@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import sys
 
-from .trace import disable_trace_persisted, enable_trace_persisted
 from .system_policy import install_system_sound_policy, remove_system_sound_policy, restart_pipewire_pulse
 
 # Make bundled modules importable inside Flatpak (if you bundle extra libs there)
@@ -14,15 +13,6 @@ if os.path.isdir(LIBDIR) and LIBDIR not in sys.path:
 
 
 def main():
-    if "--trace-off" in sys.argv:
-        disable_trace_persisted()
-        sys.argv = [a for a in sys.argv if a != "--trace-off"]
-
-    if "--trace" in sys.argv:
-        os.environ["AUDIOROUTER_TRACE"] = "1"
-        enable_trace_persisted()
-        sys.argv = [a for a in sys.argv if a != "--trace"]
-
     if "--install-system-policy" in sys.argv:
         target_sink = "vsink.system"
         for i, arg in enumerate(list(sys.argv)):

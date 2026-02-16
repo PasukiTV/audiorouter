@@ -11,7 +11,6 @@ from pathlib import Path
 
 from .core import apply_once, route_sink_input_now
 from . import pactl as pa
-from .trace import trace
 
 _STOP = False
 EVENT_DEBOUNCE_SEC = 0.25
@@ -107,12 +106,10 @@ def wait_for_pipewire(timeout: float = 15.0) -> bool:
 
 
 def _run_apply_once(reason: str = "") -> None:
-    if reason:
-        trace(f"apply_once reason={reason}")
     try:
         apply_once()
-    except Exception as exc:
-        trace(f"apply_once_error reason={reason} err={exc}")
+    except Exception:
+        pass
 
 
 def _is_new_sink_input_event_line(line: str) -> bool:
@@ -144,10 +141,9 @@ def _try_route_new_input_immediately(sink_input_id: str, reason: str) -> None:
     if not sid:
         return
     try:
-        moved = route_sink_input_now(sid)
-        trace(f"route_new_input reason={reason} sink_input={sid} moved={int(bool(moved))}")
-    except Exception as exc:
-        trace(f"route_new_input_error reason={reason} sink_input={sid} err={exc}")
+        route_sink_input_now(sid)
+    except Exception:
+        pass
 
 
 def _is_new_pulsectl_event(ev) -> bool:
@@ -192,7 +188,6 @@ def _watch_new_sink_inputs(poll_sec: float = 0.01) -> None:
     Safety net: actively detect fresh sink-input IDs so short-lived system sounds
     can be routed even when event backends emit only delayed/"other" updates.
     """
-    trace(f"new_input_watcher_start poll_sec={poll_sec}")
     seen = _scan_sink_input_ids()
     while not _STOP:
         current = _scan_sink_input_ids()
@@ -205,16 +200,13 @@ def _watch_new_sink_inputs(poll_sec: float = 0.01) -> None:
 
 
 def run_daemon():
-    trace("daemon_start")
 
     # Single-instance guard
     if not _try_acquire_daemon_lock():
-        trace("daemon_lock_busy")
         return
 
     # 1) Wait for PipeWire/Pulse to be ready
     if not wait_for_pipewire():
-        trace("daemon_pipewire_timeout")
         return
 
     # 2) Apply once initially
@@ -309,8 +301,6 @@ def _fallback_subscribe():
                 line = proc.stdout.readline()
                 if not line:
                     break
-
-                trace(f"subscribe_event line={line.strip()}")
 
                 if _is_new_sink_input_event_line(line):
                     _try_route_new_input_immediately(_sink_input_id_from_subscribe_line(line), "subscribe:new")

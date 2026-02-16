@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT="$(readlink -f "$0")"
-ROOT="$(dirname "$(dirname "$SCRIPT")")"
-
-exec /usr/bin/python3 "$ROOT/audiorouter_gui.py" "$@"
