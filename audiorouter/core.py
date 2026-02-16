@@ -20,6 +20,7 @@ Fixes:
 """
 
 from .config import load_config, load_state, save_state
+from .trace import trace
 from . import pactl as pa
 
 
@@ -82,6 +83,7 @@ def _is_system_stream(props: dict) -> bool:
 
 
 def _move_input_quietly(sink_input_id: str, target_sink: str, mute_sec: float = 0.0) -> None:
+    trace(f"move_input_quietly start sink_input={sink_input_id} target={target_sink} mute_sec={mute_sec}")
     pa.set_sink_input_mute(sink_input_id, True)
     try:
         pa.move_sink_input(sink_input_id, target_sink)
@@ -89,6 +91,7 @@ def _move_input_quietly(sink_input_id: str, target_sink: str, mute_sec: float = 
             time.sleep(mute_sec)
     finally:
         pa.set_sink_input_mute(sink_input_id, False)
+        trace(f"move_input_quietly done sink_input={sink_input_id} target={target_sink}")
 
 
 def apply_once() -> None:
@@ -239,9 +242,19 @@ def apply_once() -> None:
             continue
 
         if have_system_bus and _is_system_stream(props):
+            sid = str(inp.get("id", ""))
+            trace(
+                "system_stream_detected "
+                f"sink_input={sid} "
+                f"sink_id={inp.get('sink_id', '')} "
+                f"app={props.get('application.name', '')} "
+                f"binary={props.get('application.process.binary', '')} "
+                f"media_role={props.get('media.role', '')} "
+                f"media_name={props.get('media.name', '')}"
+            )
             try:
-                _move_input_quietly(str(inp["id"]), system_bus, mute_sec=SYSTEM_STREAM_MOVE_MUTE_SEC)
-            except Exception:
-                pass
+                _move_input_quietly(sid, system_bus, mute_sec=SYSTEM_STREAM_MOVE_MUTE_SEC)
+            except Exception as exc:
+                trace(f"system_stream_move_error sink_input={sid} err={exc}")
 
     save_state(st)

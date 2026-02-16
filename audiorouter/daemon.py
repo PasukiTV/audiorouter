@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .core import apply_once
 from . import pactl as pa
+from .trace import trace
 
 _STOP = False
 EVENT_DEBOUNCE_SEC = 0.05
@@ -102,11 +103,13 @@ def wait_for_pipewire(timeout: float = 15.0) -> bool:
     return False
 
 
-def _run_apply_once() -> None:
+def _run_apply_once(reason: str = "") -> None:
+    if reason:
+        trace(f"apply_once reason={reason}")
     try:
         apply_once()
-    except Exception:
-        pass
+    except Exception as exc:
+        trace(f"apply_once_error reason={reason} err={exc}")
 
 
 def _is_new_sink_input_event_line(line: str) -> bool:
@@ -124,7 +127,7 @@ def run_daemon():
         return
 
     # 2) Apply once initially
-    _run_apply_once()
+    _run_apply_once("startup")
 
     # 3) Event-driven if pulsectl is available, otherwise fallback subscribe
     try:
@@ -150,14 +153,14 @@ def run_daemon():
 
                     ev_type = str(getattr(_ev, "t", "")).lower()
                     if ev_type == "new":
-                        _run_apply_once()
+                        _run_apply_once("pulsectl:new")
                         return
 
                     now = time.monotonic()
                     if now - last < EVENT_DEBOUNCE_SEC:
                         return
                     last = now
-                    _run_apply_once()
+                    _run_apply_once("pulsectl:other")
 
                 pulse.event_callback_set(cb)
 
@@ -205,15 +208,17 @@ def _fallback_subscribe():
                 if not line:
                     break
 
+                trace(f"subscribe_event line={line.strip()}")
+
                 if _is_new_sink_input_event_line(line):
-                    _run_apply_once()
+                    _run_apply_once("subscribe:new")
                     continue
 
                 now = time.monotonic()
                 if now - last < EVENT_DEBOUNCE_SEC:
                     continue
                 last = now
-                _run_apply_once()
+                _run_apply_once("subscribe:other")
 
         except Exception:
             pass
