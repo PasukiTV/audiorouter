@@ -4,7 +4,7 @@ import time
 
 VIRTUAL_SWITCH_MUTE_SEC = 0.12
 PHYSICAL_SWITCH_MUTE_SEC = 0.05
-SYSTEM_STREAM_MOVE_MUTE_SEC = 0.04
+SYSTEM_STREAM_MOVE_MUTE_SEC = 0.0
 
 """
 Core logic for audiorouter.
@@ -84,11 +84,19 @@ def _is_system_stream(props: dict) -> bool:
 
 def _move_input_quietly(sink_input_id: str, target_sink: str, mute_sec: float = 0.0) -> None:
     trace(f"move_input_quietly start sink_input={sink_input_id} target={target_sink} mute_sec={mute_sec}")
+
+    # For very short system streams, extra mute/unmute pactl calls are often
+    # slower than the stream lifetime itself. Use direct move when mute window
+    # is disabled.
+    if mute_sec <= 0:
+        pa.move_sink_input(sink_input_id, target_sink)
+        trace(f"move_input_quietly done sink_input={sink_input_id} target={target_sink}")
+        return
+
     pa.set_sink_input_mute(sink_input_id, True)
     try:
         pa.move_sink_input(sink_input_id, target_sink)
-        if mute_sec > 0:
-            time.sleep(mute_sec)
+        time.sleep(mute_sec)
     finally:
         pa.set_sink_input_mute(sink_input_id, False)
         trace(f"move_input_quietly done sink_input={sink_input_id} target={target_sink}")
@@ -148,6 +156,10 @@ def route_sink_input_now(sink_input_id: str) -> bool:
 
     system_bus = "vsink.system"
     if pa.sink_exists(system_bus) and _is_system_stream(props):
+        sink_id = str(target_inp.get("sink_id", "")).strip()
+        sink_name_by_id = {str(s.get("id", "")).strip(): str(s.get("name", "")) for s in pa.list_sinks()}
+        if sink_name_by_id.get(sink_id, "") == system_bus:
+            return True
         try:
             _move_input_quietly(sid, system_bus, mute_sec=SYSTEM_STREAM_MOVE_MUTE_SEC)
             trace(f"route_sink_input_now moved sink_input={sid} target={system_bus} reason=system")
@@ -283,6 +295,7 @@ def apply_once() -> None:
 
     system_bus = "vsink.system"
     have_system_bus = pa.sink_exists(system_bus)
+    sink_name_by_id = {str(s.get("id", "")).strip(): str(s.get("name", "")) for s in pa.list_sinks()}
 
     for inp in inputs:
         props = inp.get("props", {})
@@ -318,6 +331,9 @@ def apply_once() -> None:
 
         if have_system_bus and _is_system_stream(props):
             sid = str(inp.get("id", ""))
+            sink_id = str(inp.get("sink_id", "")).strip()
+            if sink_name_by_id.get(sink_id, "") == system_bus:
+                continue
             trace(
                 "system_stream_detected "
                 f"sink_input={sid} "
