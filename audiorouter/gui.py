@@ -17,6 +17,7 @@ from .config import RULES_PATH, VSINKS_PATH, load_config, save_config
 from . import pactl as pa
 # Apply changes immediately (no "Apply" button)
 from .core import apply_once
+from .system_policy import install_system_sound_policy, remove_system_sound_policy, restart_pipewire_pulse
 
 APP_ID = "de.pasuki.audiorouter"
 
@@ -106,9 +107,15 @@ class MainWindow(Adw.ApplicationWindow):
         btn_open_vsinks.connect("clicked", lambda *_: self.open_json_editor(VSINKS_PATH, "vSinks"))
         btn_debug = Gtk.Button(label="Audio Debug Snapshot")
         btn_debug.connect("clicked", lambda *_: self.open_debug_snapshot())
+        btn_policy_install = Gtk.Button(label="Install System Sound Policy")
+        btn_policy_install.connect("clicked", lambda *_: self.install_system_sound_policy())
+        btn_policy_remove = Gtk.Button(label="Remove System Sound Policy")
+        btn_policy_remove.connect("clicked", lambda *_: self.remove_system_sound_policy())
         file_buttons.append(btn_open_rules)
         file_buttons.append(btn_open_vsinks)
         file_buttons.append(btn_debug)
+        file_buttons.append(btn_policy_install)
+        file_buttons.append(btn_policy_remove)
         root.append(file_buttons)
 
         # Lightweight status row (updates only on refresh)
@@ -333,6 +340,45 @@ class MainWindow(Adw.ApplicationWindow):
         btn_close.connect("clicked", lambda *_: editor.close())
 
         editor.present()
+
+    def _show_message(self, title: str, message: str) -> None:
+        dialog = Gtk.MessageDialog(
+            transient_for=self,
+            modal=True,
+            buttons=Gtk.ButtonsType.OK,
+            text=title,
+            secondary_text=message,
+        )
+        dialog.connect("response", lambda d, _r: d.close())
+        dialog.present()
+
+    def _apply_system_policy_async(self, install: bool) -> None:
+        def _worker():
+            try:
+                if install:
+                    path = install_system_sound_policy("vsink.system")
+                    restart_pipewire_pulse()
+                    msg = f"Policy installed:\n{path}\n\nPipeWire-Pulse was restarted."
+                    title = "System sound policy installed"
+                else:
+                    path = remove_system_sound_policy()
+                    restart_pipewire_pulse()
+                    msg = f"Policy removed:\n{path}\n\nPipeWire-Pulse was restarted."
+                    title = "System sound policy removed"
+            except Exception as exc:
+                title = "System sound policy error"
+                msg = str(exc)
+
+            GLib.idle_add(self.refresh_all)
+            GLib.idle_add(self._show_message, title, msg)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def install_system_sound_policy(self) -> None:
+        self._apply_system_policy_async(True)
+
+    def remove_system_sound_policy(self) -> None:
+        self._apply_system_policy_async(False)
 
     def refresh_all(self):
         self.cfg = load_config()
