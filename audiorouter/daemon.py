@@ -5,9 +5,10 @@ import os
 import signal
 import subprocess
 import time
+import re
 from pathlib import Path
 
-from .core import apply_once
+from .core import apply_once, route_sink_input_now
 from . import pactl as pa
 from .trace import trace
 
@@ -117,6 +118,36 @@ def _is_new_sink_input_event_line(line: str) -> bool:
     return "on sink-input" in txt and "'new'" in txt
 
 
+_SINK_INPUT_ID_RE = re.compile(r"sink-input\s+#(\d+)", re.IGNORECASE)
+
+
+def _sink_input_id_from_pulsectl_event(ev) -> str:
+    idx = getattr(ev, "index", None)
+    if idx is None:
+        return ""
+    try:
+        return str(int(idx))
+    except Exception:
+        txt = str(idx).strip()
+        return txt if txt.isdigit() else ""
+
+
+def _sink_input_id_from_subscribe_line(line: str) -> str:
+    m = _SINK_INPUT_ID_RE.search(line)
+    return m.group(1) if m else ""
+
+
+def _try_route_new_input_immediately(sink_input_id: str, reason: str) -> None:
+    sid = str(sink_input_id).strip()
+    if not sid:
+        return
+    try:
+        moved = route_sink_input_now(sid)
+        trace(f"route_new_input reason={reason} sink_input={sid} moved={int(bool(moved))}")
+    except Exception as exc:
+        trace(f"route_new_input_error reason={reason} sink_input={sid} err={exc}")
+
+
 def _is_new_pulsectl_event(ev) -> bool:
     """
     pulsectl event types are backend/version dependent.
@@ -181,6 +212,7 @@ def run_daemon():
                     nonlocal last
 
                     if _is_new_pulsectl_event(_ev):
+                        _try_route_new_input_immediately(_sink_input_id_from_pulsectl_event(_ev), "pulsectl:new")
                         _run_apply_once("pulsectl:new")
                         return
 
@@ -239,6 +271,7 @@ def _fallback_subscribe():
                 trace(f"subscribe_event line={line.strip()}")
 
                 if _is_new_sink_input_event_line(line):
+                    _try_route_new_input_immediately(_sink_input_id_from_subscribe_line(line), "subscribe:new")
                     _run_apply_once("subscribe:new")
                     continue
 

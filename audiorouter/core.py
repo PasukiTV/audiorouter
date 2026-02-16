@@ -94,6 +94,70 @@ def _move_input_quietly(sink_input_id: str, target_sink: str, mute_sec: float = 
         trace(f"move_input_quietly done sink_input={sink_input_id} target={target_sink}")
 
 
+
+
+def route_sink_input_now(sink_input_id: str) -> bool:
+    """
+    Fast path for freshly created sink-inputs: try rule/system routing directly
+    by id, before a full apply_once() reconciliation.
+    """
+    sid = str(sink_input_id).strip()
+    if not sid:
+        return False
+
+    cfg = load_config()
+    rules = cfg.get("rules", [])
+
+    target_inp = None
+    for inp in pa.list_sink_inputs():
+        if str(inp.get("id", "")).strip() == sid:
+            target_inp = inp
+            break
+
+    if not target_inp:
+        return False
+
+    props = target_inp.get("props", {})
+    app = (props.get("application.name") or "").lower()
+    bin_ = (props.get("application.process.binary") or "").lower()
+    aid = (props.get("pipewire.access.portal.app_id") or "").lower()
+
+    for r in rules:
+        match = r.get("match", {})
+        tgt = r.get("target_bus")
+
+        if not tgt or not pa.sink_exists(tgt):
+            continue
+
+        ok = True
+        if "binary" in match and match["binary"].lower() not in bin_:
+            ok = False
+        if "app" in match and match["app"].lower() not in app:
+            ok = False
+        if "app_id" in match and match["app_id"].lower() not in aid:
+            ok = False
+
+        if ok:
+            try:
+                pa.move_sink_input(sid, tgt)
+                trace(f"route_sink_input_now moved sink_input={sid} target={tgt} reason=rule")
+                return True
+            except Exception as exc:
+                trace(f"route_sink_input_now_error sink_input={sid} target={tgt} reason=rule err={exc}")
+                return False
+
+    system_bus = "vsink.system"
+    if pa.sink_exists(system_bus) and _is_system_stream(props):
+        try:
+            _move_input_quietly(sid, system_bus, mute_sec=SYSTEM_STREAM_MOVE_MUTE_SEC)
+            trace(f"route_sink_input_now moved sink_input={sid} target={system_bus} reason=system")
+            return True
+        except Exception as exc:
+            trace(f"route_sink_input_now_error sink_input={sid} target={system_bus} reason=system err={exc}")
+            return False
+
+    return False
+
 def apply_once() -> None:
     cfg = load_config()
     st = load_state()
