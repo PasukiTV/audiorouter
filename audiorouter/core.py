@@ -38,6 +38,48 @@ def _get_physical_default_sink() -> str | None:
     return default
 
 
+
+def _is_system_stream(props: dict) -> bool:
+    """
+    Heuristic classification for short system sounds/notifications so they can
+    be routed to the system bus immediately.
+    """
+    role = (props.get("media.role") or "").lower()
+    if role in {"event", "notification"}:
+        return True
+
+    app = (props.get("application.name") or "").lower()
+    binary = (props.get("application.process.binary") or "").lower()
+    app_id = (props.get("pipewire.access.portal.app_id") or "").lower()
+    media_name = (props.get("media.name") or "").lower()
+
+    known_apps = {
+        "gnome-shell",
+        "plasmashell",
+        "kded5",
+        "kded6",
+        "xfce4-notifyd",
+        "notification-daemon",
+        "mako",
+    }
+    known_bins = {
+        "gnome-shell",
+        "plasmashell",
+        "xfce4-notifyd",
+        "notification-daemon",
+        "mako",
+        "canberra-gtk-play",
+    }
+
+    if app in known_apps or binary in known_bins:
+        return True
+
+    if app_id.startswith("org.freedesktop.impl.portal") and "portal" in media_name:
+        return True
+
+    return "system sound" in media_name or "notification" in media_name
+
+
 def apply_once() -> None:
     cfg = load_config()
     st = load_state()
@@ -150,12 +192,16 @@ def apply_once() -> None:
     # ---------------------------------------------------------
     inputs = pa.list_sink_inputs()
 
+    system_bus = "vsink.system"
+    have_system_bus = pa.sink_exists(system_bus)
+
     for inp in inputs:
         props = inp.get("props", {})
         app = (props.get("application.name") or "").lower()
         bin_ = (props.get("application.process.binary") or "").lower()
         aid = (props.get("pipewire.access.portal.app_id") or "").lower()
 
+        matched_rule = False
         for r in rules:
             match = r.get("match", {})
             tgt = r.get("target_bus")
@@ -172,9 +218,19 @@ def apply_once() -> None:
                 ok = False
 
             if ok:
+                matched_rule = True
                 try:
                     pa.move_sink_input(str(inp["id"]), tgt)
                 except Exception:
                     pass
+
+        if matched_rule:
+            continue
+
+        if have_system_bus and _is_system_stream(props):
+            try:
+                pa.move_sink_input(str(inp["id"]), system_bus)
+            except Exception:
+                pass
 
     save_state(st)
