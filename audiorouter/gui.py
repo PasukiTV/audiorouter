@@ -9,7 +9,7 @@ from pathlib import Path
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Pango, GLib
+from gi.repository import Gtk, Adw, Pango, GLib, Gio
 
 from .autostart import is_enabled as autostart_is_enabled, enable as autostart_enable, disable as autostart_disable
 
@@ -89,6 +89,8 @@ class MainWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         root.append(header)
 
+        self._setup_hamburger_menu(header)
+
         btn_donate = Gtk.Button(label="Donate ❤️")
         btn_donate.add_css_class("suggested-action")  # schöner GNOME-Look
         btn_donate.connect("clicked", open_donate)
@@ -102,43 +104,64 @@ class MainWindow(Adw.ApplicationWindow):
         root.append(self.autostart_check)
 
         file_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        file_buttons.set_homogeneous(False)
         btn_open_rules = Gtk.Button(label="Open Routing Rules")
         btn_open_rules.connect("clicked", lambda *_: self.open_json_editor(RULES_PATH, "Routing Rules"))
         btn_open_vsinks = Gtk.Button(label="Open vSinks")
         btn_open_vsinks.connect("clicked", lambda *_: self.open_json_editor(VSINKS_PATH, "vSinks"))
-        btn_debug = Gtk.Button(label="Audio Debug Snapshot")
-        btn_debug.connect("clicked", lambda *_: self.open_debug_snapshot())
         btn_policy_install = Gtk.Button(label="Install System Sound Policy")
         btn_policy_install.set_tooltip_text("Installiert PipeWire stream.rules und leitet System-/Benachrichtigungssounds auf vsink.system.")
         btn_policy_install.connect("clicked", lambda *_: self.install_system_sound_policy())
         btn_policy_remove = Gtk.Button(label="Remove System Sound Policy")
         btn_policy_remove.set_tooltip_text("Entfernt die installierte Systemsound-Policy und startet pipewire-pulse neu.")
         btn_policy_remove.connect("clicked", lambda *_: self.remove_system_sound_policy())
-        btn_policy_delete_file = Gtk.Button(label="Delete audiorouter-deamon.lock")
-        btn_policy_delete_file.set_tooltip_text("Löscht die Lock-Datei audiorouter-deamon.lock im Cache-Ordner.")
-        btn_policy_delete_file.connect("clicked", lambda *_: self.delete_daemon_rules_file())
         file_buttons.append(btn_open_rules)
         file_buttons.append(btn_open_vsinks)
-        file_buttons.append(btn_debug)
         file_buttons.append(btn_policy_install)
         file_buttons.append(btn_policy_remove)
-        file_buttons.append(btn_policy_delete_file)
         root.append(file_buttons)
 
-        # Lightweight status row (updates only on refresh)
-        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        status_frame = Gtk.Frame()
+        status_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                             margin_top=10, margin_bottom=10, margin_start=12, margin_end=12)
+        status_title = Gtk.Label(label="System Status", xalign=0)
+        status_title.add_css_class("heading")
+        status_grid = Gtk.Grid(column_spacing=16, row_spacing=6)
+
+        lbl_pw_key = Gtk.Label(label="PipeWire/Pulse", xalign=0)
+        lbl_pw_key.add_css_class("dim-label")
         self.status_pipewire = Gtk.Label(xalign=0)
+
+        lbl_sink_key = Gtk.Label(label="Default Sink", xalign=0)
+        lbl_sink_key.add_css_class("dim-label")
         self.status_default_sink = Gtk.Label(xalign=0)
+
+        lbl_daemon_key = Gtk.Label(label="Daemon", xalign=0)
+        lbl_daemon_key.add_css_class("dim-label")
         self.status_daemon = Gtk.Label(xalign=0)
+
+        lbl_streams_key = Gtk.Label(label="Aktive Streams", xalign=0)
+        lbl_streams_key.add_css_class("dim-label")
         self.status_streams = Gtk.Label(xalign=0)
+
         for lbl in (self.status_pipewire, self.status_default_sink, self.status_daemon, self.status_streams):
             lbl.set_ellipsize(Pango.EllipsizeMode.END)
-            lbl.set_max_width_chars(42)
-        status_row.append(self.status_pipewire)
-        status_row.append(self.status_default_sink)
-        status_row.append(self.status_daemon)
-        status_row.append(self.status_streams)
-        root.append(status_row)
+            lbl.set_max_width_chars(70)
+            lbl.set_hexpand(True)
+
+        status_grid.attach(lbl_pw_key, 0, 0, 1, 1)
+        status_grid.attach(self.status_pipewire, 1, 0, 1, 1)
+        status_grid.attach(lbl_sink_key, 0, 1, 1, 1)
+        status_grid.attach(self.status_default_sink, 1, 1, 1, 1)
+        status_grid.attach(lbl_daemon_key, 0, 2, 1, 1)
+        status_grid.attach(self.status_daemon, 1, 2, 1, 1)
+        status_grid.attach(lbl_streams_key, 0, 3, 1, 1)
+        status_grid.attach(self.status_streams, 1, 3, 1, 1)
+
+        status_box.append(status_title)
+        status_box.append(status_grid)
+        status_frame.set_child(status_box)
+        root.append(status_frame)
 
         btn_refresh = Gtk.Button(label="Refresh")
         btn_refresh.connect("clicked", lambda *_: self.refresh_all())
@@ -232,6 +255,32 @@ class MainWindow(Adw.ApplicationWindow):
 
         apply_once()
         self.refresh_all()
+
+    def _setup_hamburger_menu(self, header: Adw.HeaderBar) -> None:
+        actions = Gio.SimpleActionGroup()
+
+        act_debug_snapshot = Gio.SimpleAction.new("debug_snapshot", None)
+        act_debug_snapshot.connect("activate", lambda *_: self.open_debug_snapshot())
+        actions.add_action(act_debug_snapshot)
+
+        act_delete_lock = Gio.SimpleAction.new("delete_daemon_lock", None)
+        act_delete_lock.connect("activate", lambda *_: self.delete_daemon_rules_file())
+        actions.add_action(act_delete_lock)
+
+        self.insert_action_group("win", actions)
+
+        debug_menu = Gio.Menu()
+        debug_menu.append("Audio Debug Snapshot", "win.debug_snapshot")
+        debug_menu.append("Delete audiorouter-deamon.lock", "win.delete_daemon_lock")
+
+        root_menu = Gio.Menu()
+        root_menu.append_submenu("DEBUG", debug_menu)
+
+        menu_btn = Gtk.MenuButton()
+        menu_btn.set_icon_name("open-menu-symbolic")
+        menu_btn.set_tooltip_text("Open menu")
+        menu_btn.set_menu_model(root_menu)
+        header.pack_end(menu_btn)
 
 
     def open_json_editor(self, path: Path, title: str):
