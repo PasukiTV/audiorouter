@@ -232,7 +232,7 @@ class MainWindow(Adw.ApplicationWindow):
         streams_scroll.set_child(self.stream_list)
         right.append(streams_scroll)
 
-        mic_title = Gtk.Label(label="Running input devices (OBS/Discord ready)", xalign=0)
+        mic_title = Gtk.Label(label="Running input devices", xalign=0)
         mic_title.add_css_class("title-3")
         right.append(mic_title)
 
@@ -731,6 +731,7 @@ class MainWindow(Adw.ApplicationWindow):
             return 0
 
         buses = [b["name"] for b in self.cfg.get("buses", [])]
+        input_targets = ["none", *buses]
         input_routes = self.cfg.get("input_routes", [])
         source_desc = pa.list_source_descriptions()
 
@@ -749,8 +750,8 @@ class MainWindow(Adw.ApplicationWindow):
             label.set_tooltip_text(source_name)
             box.append(label)
 
-            if buses:
-                dd = Gtk.DropDown.new_from_strings(buses)
+            if input_targets:
+                dd = Gtk.DropDown.new_from_strings(input_targets)
                 dd.set_size_request(170, -1)
                 self.mic_target_group.add_widget(dd)
 
@@ -758,19 +759,24 @@ class MainWindow(Adw.ApplicationWindow):
                 has_rule = rule_idx >= 0
                 if has_rule:
                     target_bus = input_routes[rule_idx].get("target_bus")
-                    if target_bus in buses:
-                        dd.set_selected(buses.index(target_bus))
+                    if target_bus in input_targets:
+                        dd.set_selected(input_targets.index(target_bus))
                     else:
                         dd.set_selected(0)
                 else:
                     dd.set_selected(0)
 
                 def on_move(_btn, source_name=source_name, dropdown=dd):
-                    tgt_bus = buses[dropdown.get_selected()]
+                    tgt_bus = input_targets[dropdown.get_selected()]
                     try:
                         # transient move only: do not create/update persistent Add Rule entries
                         if not pa.source_exists(source_name):
                             self._show_message("Input route error", f"Input source not found\n{source_name}")
+                            return
+                        if tgt_bus == "none":
+                            # remove all loopbacks for this input source
+                            pa.cleanup_wrong_loopbacks_for_source(source_name, "__none__")
+                            self.refresh_all()
                             return
                         if not pa.sink_exists(tgt_bus):
                             self._show_message("Input route error", f"Target bus not found\n{tgt_bus}")
@@ -811,9 +817,10 @@ class MainWindow(Adw.ApplicationWindow):
                         self.refresh_all()
                         return
 
-                    target = buses[dropdown.get_selected()]
+                    target = input_targets[dropdown.get_selected()]
                     cfg["input_routes"] = [r for r in cfg["input_routes"] if str(r.get("source", "")).strip() != source_name]
-                    cfg["input_routes"].append({"source": source_name, "target_bus": target})
+                    if target != "none":
+                        cfg["input_routes"].append({"source": source_name, "target_bus": target})
                     save_config(cfg)
                     apply_once()
                     self.refresh_all()
@@ -847,6 +854,7 @@ class MainWindow(Adw.ApplicationWindow):
             return 0
 
         buses = [b["name"] for b in self.cfg.get("buses", [])]
+        app_targets = ["none", *buses]
         rules = self.cfg.get("rules", [])
 
         # Map sink_id -> sink_name
@@ -871,8 +879,8 @@ class MainWindow(Adw.ApplicationWindow):
             label.set_hexpand(True)
             box.append(label)
 
-            if buses:
-                dd = Gtk.DropDown.new_from_strings(buses)
+            if app_targets:
+                dd = Gtk.DropDown.new_from_strings(app_targets)
                 dd.set_size_request(170, -1)
                 self.stream_target_group.add_widget(dd)
 
@@ -881,16 +889,18 @@ class MainWindow(Adw.ApplicationWindow):
                 cur_sink_name = sink_id_to_name.get(cur_sink_id, "")
 
                 # If the stream is currently on one of our buses, select that bus in dropdown
-                if cur_sink_name in buses:
-                    dd.set_selected(buses.index(cur_sink_name))
+                if cur_sink_name in app_targets:
+                    dd.set_selected(app_targets.index(cur_sink_name))
                 else:
-                    # otherwise default to first bus (or keep 0)
+                    # default to no routing
                     dd.set_selected(0)
 
 
                 def on_move(_btn, sink_input_id=sid, dropdown=dd):
-                    tgt = buses[dropdown.get_selected()]
+                    tgt = app_targets[dropdown.get_selected()]
                     try:
+                        if tgt == "none":
+                            tgt = pa.get_physical_default_sink()
                         pa.move_sink_input(sink_input_id, tgt)
                     except Exception:
                         pass
@@ -911,8 +921,8 @@ class MainWindow(Adw.ApplicationWindow):
                 # If rule exists: preselect its target bus in the dropdown
                 if has_rule:
                     target_bus = rules[rule_idx].get("target_bus")
-                    if target_bus in buses:
-                        dd.set_selected(buses.index(target_bus))
+                    if target_bus in app_targets:
+                        dd.set_selected(app_targets.index(target_bus))
 
                 btn_rule = Gtk.Button(label=("Delete Rule" if has_rule else "Add Rule"))
                 btn_rule.set_size_request(110, -1)
@@ -936,8 +946,9 @@ class MainWindow(Adw.ApplicationWindow):
                         return
 
                     # add rule
-                    target = buses[dropdown.get_selected()]
-                    cfg["rules"].append({"match": match, "target_bus": target})
+                    target = app_targets[dropdown.get_selected()]
+                    if target != "none":
+                        cfg["rules"].append({"match": match, "target_bus": target})
                     save_config(cfg)
                     apply_once()
                     self.refresh_all()
