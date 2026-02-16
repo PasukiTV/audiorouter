@@ -281,7 +281,7 @@ def apply_once() -> None:
         route_to = b.get("route_to", "default")
 
         # Resolve target safely
-        if route_to == "none":
+        if str(route_to).strip().lower() in {"none", "no routing"}:
             prev_mod = str(st["route_modules"].get(name, "") or "")
             if prev_mod:
                 pa.unload_module(prev_mod)

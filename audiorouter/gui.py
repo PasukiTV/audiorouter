@@ -58,6 +58,12 @@ def friendly_sink_list():
     return items
 
 
+
+
+def _is_no_routing_target(target: str) -> bool:
+    t = (target or "").strip().lower()
+    return t in {"none", "no routing"}
+
 def is_internal_loopback(inp: dict) -> bool:
     props = inp.get("props", {})
     media = (props.get("media.name") or "").lower()
@@ -731,7 +737,7 @@ class MainWindow(Adw.ApplicationWindow):
             return 0
 
         buses = [b["name"] for b in self.cfg.get("buses", [])]
-        input_targets = ["none", *buses]
+        input_targets = ["no routing", *buses]
         input_routes = self.cfg.get("input_routes", [])
         source_desc = pa.list_source_descriptions()
 
@@ -763,8 +769,9 @@ class MainWindow(Adw.ApplicationWindow):
                     dd.set_selected(input_targets.index(current_target))
                 elif has_rule:
                     target_bus = input_routes[rule_idx].get("target_bus")
-                    if target_bus in input_targets:
-                        dd.set_selected(input_targets.index(target_bus))
+                    target_bus_norm = "no routing" if _is_no_routing_target(str(target_bus)) else str(target_bus)
+                    if target_bus_norm in input_targets:
+                        dd.set_selected(input_targets.index(target_bus_norm))
                     else:
                         dd.set_selected(0)
                 else:
@@ -777,7 +784,7 @@ class MainWindow(Adw.ApplicationWindow):
                         if not pa.source_exists(source_name):
                             self._show_message("Input route error", f"Input source not found\n{source_name}")
                             return
-                        if tgt_bus == "none":
+                        if _is_no_routing_target(tgt_bus):
                             # remove all loopbacks for this input source
                             pa.cleanup_wrong_loopbacks_for_source(source_name, "__none__")
                             self.refresh_all()
@@ -823,7 +830,7 @@ class MainWindow(Adw.ApplicationWindow):
 
                     target = input_targets[dropdown.get_selected()]
                     cfg["input_routes"] = [r for r in cfg["input_routes"] if str(r.get("source", "")).strip() != source_name]
-                    if target != "none":
+                    if not _is_no_routing_target(target):
                         cfg["input_routes"].append({"source": source_name, "target_bus": target})
                     save_config(cfg)
                     apply_once()
@@ -858,7 +865,7 @@ class MainWindow(Adw.ApplicationWindow):
             return 0
 
         buses = [b["name"] for b in self.cfg.get("buses", [])]
-        app_targets = ["none", *buses]
+        app_targets = ["no routing", *buses]
         rules = self.cfg.get("rules", [])
 
         # Map sink_id -> sink_name
@@ -903,8 +910,9 @@ class MainWindow(Adw.ApplicationWindow):
                 def on_move(_btn, sink_input_id=sid, dropdown=dd):
                     tgt = app_targets[dropdown.get_selected()]
                     try:
-                        if tgt == "none":
-                            tgt = pa.get_physical_default_sink()
+                        if _is_no_routing_target(tgt):
+                            # no routing for running app streams: keep current target unchanged
+                            return
                         pa.move_sink_input(sink_input_id, tgt)
                     except Exception:
                         pass
@@ -925,8 +933,9 @@ class MainWindow(Adw.ApplicationWindow):
                 # If rule exists: preselect its target bus in the dropdown
                 if has_rule:
                     target_bus = rules[rule_idx].get("target_bus")
-                    if target_bus in app_targets:
-                        dd.set_selected(app_targets.index(target_bus))
+                    target_bus_norm = "no routing" if _is_no_routing_target(str(target_bus)) else str(target_bus)
+                    if target_bus_norm in app_targets:
+                        dd.set_selected(app_targets.index(target_bus_norm))
 
                 btn_rule = Gtk.Button(label=("Delete Rule" if has_rule else "Add Rule"))
                 btn_rule.set_size_request(110, -1)
@@ -951,7 +960,7 @@ class MainWindow(Adw.ApplicationWindow):
 
                     # add rule
                     target = app_targets[dropdown.get_selected()]
-                    if target != "none":
+                    if not _is_no_routing_target(target):
                         cfg["rules"].append({"match": match, "target_bus": target})
                     save_config(cfg)
                     apply_once()
