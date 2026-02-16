@@ -18,7 +18,7 @@ from .config import RULES_PATH, VSINKS_PATH, load_config, save_config
 from . import pactl as pa
 # Apply changes immediately (no "Apply" button)
 from .core import apply_once
-from .system_policy import install_system_sound_policy, remove_system_sound_policy, restart_pipewire_pulse
+from .system_policy import install_system_sound_policy, remove_system_sound_policy, restart_pipewire_pulse, system_sound_policy_installed
 
 APP_ID = "de.pasuki.audiorouter"
 
@@ -89,7 +89,7 @@ class MainWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         root.append(header)
 
-        self._setup_hamburger_menu(header)
+        self._setup_header_menu(header)
 
         btn_donate = Gtk.Button(label="Donate ❤️")
         btn_donate.add_css_class("suggested-action")  # schöner GNOME-Look
@@ -103,65 +103,32 @@ class MainWindow(Adw.ApplicationWindow):
         self.autostart_check.connect("toggled", self.on_autostart_toggled)
         root.append(self.autostart_check)
 
-        file_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        file_buttons.set_homogeneous(False)
-        btn_open_rules = Gtk.Button(label="Open Routing Rules")
-        btn_open_rules.connect("clicked", lambda *_: self.open_json_editor(RULES_PATH, "Routing Rules"))
-        btn_open_vsinks = Gtk.Button(label="Open vSinks")
-        btn_open_vsinks.connect("clicked", lambda *_: self.open_json_editor(VSINKS_PATH, "vSinks"))
-        btn_policy_install = Gtk.Button(label="Install System Sound Policy")
-        btn_policy_install.set_tooltip_text("Installiert PipeWire stream.rules und leitet System-/Benachrichtigungssounds auf vsink.system.")
-        btn_policy_install.connect("clicked", lambda *_: self.install_system_sound_policy())
-        btn_policy_remove = Gtk.Button(label="Remove System Sound Policy")
-        btn_policy_remove.set_tooltip_text("Entfernt die installierte Systemsound-Policy und startet pipewire-pulse neu.")
-        btn_policy_remove.connect("clicked", lambda *_: self.remove_system_sound_policy())
-        file_buttons.append(btn_open_rules)
-        file_buttons.append(btn_open_vsinks)
-        file_buttons.append(btn_policy_install)
-        file_buttons.append(btn_policy_remove)
-        root.append(file_buttons)
+        quick_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        quick_actions.set_homogeneous(False)
 
-        status_frame = Gtk.Frame()
-        status_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
-                             margin_top=10, margin_bottom=10, margin_start=12, margin_end=12)
-        status_title = Gtk.Label(label="System Status", xalign=0)
-        status_title.add_css_class("heading")
-        status_grid = Gtk.Grid(column_spacing=16, row_spacing=6)
+        self.btn_policy_toggle = Gtk.Button(label="")
+        self.btn_policy_toggle.add_css_class("suggested-action")
+        self.btn_policy_toggle.connect("clicked", lambda *_: self.toggle_system_sound_policy())
 
-        lbl_pw_key = Gtk.Label(label="PipeWire/Pulse", xalign=0)
-        lbl_pw_key.add_css_class("dim-label")
-        self.status_pipewire = Gtk.Label(xalign=0)
+        quick_actions.append(self.btn_policy_toggle)
+        root.append(quick_actions)
 
-        lbl_sink_key = Gtk.Label(label="Default Sink", xalign=0)
-        lbl_sink_key.add_css_class("dim-label")
-        self.status_default_sink = Gtk.Label(xalign=0)
+        status_cards = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
 
-        lbl_daemon_key = Gtk.Label(label="Daemon", xalign=0)
-        lbl_daemon_key.add_css_class("dim-label")
-        self.status_daemon = Gtk.Label(xalign=0)
+        self.status_card_pipewire = self._make_status_card("🔊", "PipeWire/Pulse")
+        self.status_card_default_sink = self._make_status_card("🎯", "Default Sink")
+        self.status_card_daemon = self._make_status_card("⚙️", "Daemon")
+        self.status_card_streams = self._make_status_card("🎵", "Aktive Streams")
 
-        lbl_streams_key = Gtk.Label(label="Aktive Streams", xalign=0)
-        lbl_streams_key.add_css_class("dim-label")
-        self.status_streams = Gtk.Label(xalign=0)
+        for card in (
+            self.status_card_pipewire,
+            self.status_card_default_sink,
+            self.status_card_daemon,
+            self.status_card_streams,
+        ):
+            status_cards.append(card["frame"])
 
-        for lbl in (self.status_pipewire, self.status_default_sink, self.status_daemon, self.status_streams):
-            lbl.set_ellipsize(Pango.EllipsizeMode.END)
-            lbl.set_max_width_chars(70)
-            lbl.set_hexpand(True)
-
-        status_grid.attach(lbl_pw_key, 0, 0, 1, 1)
-        status_grid.attach(self.status_pipewire, 1, 0, 1, 1)
-        status_grid.attach(lbl_sink_key, 0, 1, 1, 1)
-        status_grid.attach(self.status_default_sink, 1, 1, 1, 1)
-        status_grid.attach(lbl_daemon_key, 0, 2, 1, 1)
-        status_grid.attach(self.status_daemon, 1, 2, 1, 1)
-        status_grid.attach(lbl_streams_key, 0, 3, 1, 1)
-        status_grid.attach(self.status_streams, 1, 3, 1, 1)
-
-        status_box.append(status_title)
-        status_box.append(status_grid)
-        status_frame.set_child(status_box)
-        root.append(status_frame)
+        root.append(status_cards)
 
         btn_refresh = Gtk.Button(label="Refresh")
         btn_refresh.connect("clicked", lambda *_: self.refresh_all())
@@ -256,8 +223,16 @@ class MainWindow(Adw.ApplicationWindow):
         apply_once()
         self.refresh_all()
 
-    def _setup_hamburger_menu(self, header: Adw.HeaderBar) -> None:
+    def _setup_header_menu(self, header: Adw.HeaderBar) -> None:
         actions = Gio.SimpleActionGroup()
+
+        act_open_rules = Gio.SimpleAction.new("open_rules", None)
+        act_open_rules.connect("activate", lambda *_: self.open_json_editor(RULES_PATH, "Routing Rules"))
+        actions.add_action(act_open_rules)
+
+        act_open_vsinks = Gio.SimpleAction.new("open_vsinks", None)
+        act_open_vsinks.connect("activate", lambda *_: self.open_json_editor(VSINKS_PATH, "vSinks"))
+        actions.add_action(act_open_vsinks)
 
         act_debug_snapshot = Gio.SimpleAction.new("debug_snapshot", None)
         act_debug_snapshot.connect("activate", lambda *_: self.open_debug_snapshot())
@@ -267,20 +242,79 @@ class MainWindow(Adw.ApplicationWindow):
         act_delete_lock.connect("activate", lambda *_: self.delete_daemon_rules_file())
         actions.add_action(act_delete_lock)
 
+        act_donate = Gio.SimpleAction.new("donate", None)
+        act_donate.connect("activate", lambda *_: open_donate(None))
+        actions.add_action(act_donate)
+
         self.insert_action_group("win", actions)
+
+        cfg_menu = Gio.Menu()
+        cfg_menu.append("Open Routing Rules", "win.open_rules")
+        cfg_menu.append("Open vSinks", "win.open_vsinks")
 
         debug_menu = Gio.Menu()
         debug_menu.append("Audio Debug Snapshot", "win.debug_snapshot")
         debug_menu.append("Delete audiorouter-deamon.lock", "win.delete_daemon_lock")
 
+        help_menu = Gio.Menu()
+        help_menu.append("Donate", "win.donate")
+
         root_menu = Gio.Menu()
+        root_menu.append_submenu("Configuration", cfg_menu)
         root_menu.append_submenu("DEBUG", debug_menu)
+        root_menu.append_submenu("Help", help_menu)
 
         menu_btn = Gtk.MenuButton()
         menu_btn.set_icon_name("open-menu-symbolic")
         menu_btn.set_tooltip_text("Open menu")
         menu_btn.set_menu_model(root_menu)
         header.pack_end(menu_btn)
+
+    def _make_status_card(self, icon: str, title: str) -> dict:
+        frame = Gtk.Frame()
+        frame.set_hexpand(True)
+
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=4,
+            margin_top=8,
+            margin_bottom=8,
+            margin_start=10,
+            margin_end=10,
+        )
+
+        title_lbl = Gtk.Label(label=f"{icon} {title}", xalign=0)
+        title_lbl.add_css_class("dim-label")
+
+        value_lbl = Gtk.Label(xalign=0)
+        value_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        value_lbl.set_max_width_chars(36)
+
+        box.append(title_lbl)
+        box.append(value_lbl)
+        frame.set_child(box)
+        return {"frame": frame, "title": title_lbl, "value": value_lbl}
+
+    def _set_status_card(self, card: dict, value: str) -> None:
+        val = card["value"]
+        val.set_text(value)
+        val.set_tooltip_text(value)
+
+    def _refresh_policy_toggle_button(self) -> None:
+        installed = system_sound_policy_installed()
+        if installed:
+            self.btn_policy_toggle.set_label("System Sound Policy entfernen")
+            self.btn_policy_toggle.remove_css_class("suggested-action")
+            self.btn_policy_toggle.add_css_class("destructive-action")
+            self.btn_policy_toggle.set_tooltip_text("Entfernt die Systemsound-Policy und startet PipeWire/Pulse neu.")
+        else:
+            self.btn_policy_toggle.set_label("System Sound Policy installieren")
+            self.btn_policy_toggle.remove_css_class("destructive-action")
+            self.btn_policy_toggle.add_css_class("suggested-action")
+            self.btn_policy_toggle.set_tooltip_text("Installiert die Systemsound-Policy und startet PipeWire/Pulse neu.")
+
+    def toggle_system_sound_policy(self) -> None:
+        self._apply_system_policy_async(not system_sound_policy_installed())
 
 
     def open_json_editor(self, path: Path, title: str):
@@ -483,6 +517,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.refresh_buses()
         stream_count = self.refresh_streams()
         self.refresh_status(stream_count)
+        self._refresh_policy_toggle_button()
 
     def on_autostart_toggled(self, btn: Gtk.CheckButton):
         state = btn.get_active()
@@ -525,14 +560,14 @@ class MainWindow(Adw.ApplicationWindow):
             default_sink = pa.get_default_sink() or "-"
             sink_count = len(pa.list_sinks())
             sink_desc = pa.list_sink_descriptions().get(default_sink, default_sink)
-            self.status_pipewire.set_text(f"PipeWire/Pulse: ✅ bereit ({sink_count} Sinks)")
-            self.status_default_sink.set_text(f"Default Sink: {sink_desc}")
+            self._set_status_card(self.status_card_pipewire, f"✅ bereit ({sink_count} Sinks)")
+            self._set_status_card(self.status_card_default_sink, sink_desc)
         else:
-            self.status_pipewire.set_text("PipeWire/Pulse: ❌ nicht erreichbar")
-            self.status_default_sink.set_text("Default Sink: -")
+            self._set_status_card(self.status_card_pipewire, "❌ nicht erreichbar")
+            self._set_status_card(self.status_card_default_sink, "-")
 
-        self.status_daemon.set_text(f"Daemon: {'✅ läuft' if self._daemon_running() else '⚠️ gestoppt'}")
-        self.status_streams.set_text(f"Aktive Streams: {stream_count}")
+        self._set_status_card(self.status_card_daemon, "✅ läuft" if self._daemon_running() else "⚠️ gestoppt")
+        self._set_status_card(self.status_card_streams, str(stream_count))
 
     def refresh_buses(self):
         for child in list(self.bus_list):

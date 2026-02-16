@@ -92,3 +92,12 @@ def remove_system_sound_policy() -> Path:
 def restart_pipewire_pulse() -> None:
     # Reload policy quickly; if user service manager is unavailable, this is best-effort.
     _run_host_cmd(["systemctl", "--user", "restart", "pipewire-pulse.service"])
+
+
+def system_sound_policy_installed() -> bool:
+    path = _pipewire_pulse_conf_path()
+    if not _in_flatpak():
+        return path.exists()
+    qf = shlex.quote(str(path))
+    res = _run_host_cmd(["sh", "-lc", f"test -f {qf} && echo yes || true"])
+    return (res.stdout or "").strip() == "yes"
