@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from pathlib import Path
 
 import gi
@@ -108,10 +109,13 @@ class MainWindow(Adw.ApplicationWindow):
         btn_debug = Gtk.Button(label="Audio Debug Snapshot")
         btn_debug.connect("clicked", lambda *_: self.open_debug_snapshot())
         btn_policy_install = Gtk.Button(label="Install System Sound Policy")
+        btn_policy_install.set_tooltip_text("Installiert PipeWire stream.rules und leitet System-/Benachrichtigungssounds auf vsink.system.")
         btn_policy_install.connect("clicked", lambda *_: self.install_system_sound_policy())
         btn_policy_remove = Gtk.Button(label="Remove System Sound Policy")
+        btn_policy_remove.set_tooltip_text("Entfernt die installierte Systemsound-Policy und startet pipewire-pulse neu.")
         btn_policy_remove.connect("clicked", lambda *_: self.remove_system_sound_policy())
         btn_policy_delete_file = Gtk.Button(label="Delete Daemon Rules File")
+        btn_policy_delete_file.set_tooltip_text("Löscht nur die Policy-Datei (ohne automatische Neuinstallation).")
         btn_policy_delete_file.connect("clicked", lambda *_: self.delete_daemon_rules_file())
         file_buttons.append(btn_open_rules)
         file_buttons.append(btn_open_vsinks)
@@ -355,17 +359,31 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.connect("response", lambda d, _r: d.close())
         dialog.present()
 
+    def _reload_audio_stack_and_reapply(self) -> None:
+        restart_pipewire_pulse()
+
+        # PipeWire restart drops runtime virtual sinks/modules. Re-apply routing
+        # once the server is reachable again so vsinks are recreated.
+        for _ in range(30):
+            if pa.try_pactl("info").strip():
+                try:
+                    apply_once()
+                except Exception:
+                    pass
+                return
+            time.sleep(0.2)
+
     def _apply_system_policy_async(self, install: bool) -> None:
         def _worker():
             try:
                 if install:
                     path = install_system_sound_policy("vsink.system")
-                    restart_pipewire_pulse()
+                    self._reload_audio_stack_and_reapply()
                     msg = f"Policy installed:\n{path}\n\nPipeWire-Pulse was restarted."
                     title = "System sound policy installed"
                 else:
                     path = remove_system_sound_policy()
-                    restart_pipewire_pulse()
+                    self._reload_audio_stack_and_reapply()
                     msg = f"Policy removed:\n{path}\n\nPipeWire-Pulse was restarted."
                     title = "System sound policy removed"
             except Exception as exc:
