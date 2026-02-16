@@ -14,7 +14,8 @@ from . import pactl as pa
 from .trace import trace
 
 _STOP = False
-EVENT_DEBOUNCE_SEC = 0.05
+EVENT_DEBOUNCE_SEC = 0.25
+MAINTENANCE_APPLY_SEC = 5.0
 
 
 def _handle_stop(_sig, _frame):
@@ -186,7 +187,7 @@ def _scan_sink_input_ids() -> set[str]:
     return ids
 
 
-def _watch_new_sink_inputs(poll_sec: float = 0.02) -> None:
+def _watch_new_sink_inputs(poll_sec: float = 0.01) -> None:
     """
     Safety net: actively detect fresh sink-input IDs so short-lived system sounds
     can be routed even when event backends emit only delayed/"other" updates.
@@ -237,12 +238,13 @@ def run_daemon():
         try:
             with pulsectl.Pulse("audiorouter-daemon") as pulse:
                 last = 0.0
+                last_maintenance = 0.0
 
                 # instead of "all": only what we need
                 pulse.event_mask_set("sink_input")
 
                 def cb(_ev):
-                    nonlocal last
+                    nonlocal last, last_maintenance
 
                     if _is_new_pulsectl_event(_ev):
                         _try_route_new_input_immediately(_sink_input_id_from_pulsectl_event(_ev), "pulsectl:new")
@@ -253,7 +255,13 @@ def run_daemon():
                     if now - last < EVENT_DEBOUNCE_SEC:
                         return
                     last = now
-                    _run_apply_once("pulsectl:other")
+
+                    # "other" events are noisy and expensive if they trigger full
+                    # reconciliation each time. Keep a low-rate maintenance pass.
+                    if now - last_maintenance < MAINTENANCE_APPLY_SEC:
+                        return
+                    last_maintenance = now
+                    _run_apply_once("pulsectl:maintenance")
 
                 pulse.event_callback_set(cb)
 
@@ -296,6 +304,7 @@ def _fallback_subscribe():
             )
 
             last = 0.0
+            last_maintenance = 0.0
             while not _STOP and proc.stdout is not None:
                 line = proc.stdout.readline()
                 if not line:
@@ -312,7 +321,10 @@ def _fallback_subscribe():
                 if now - last < EVENT_DEBOUNCE_SEC:
                     continue
                 last = now
-                _run_apply_once("subscribe:other")
+                if now - last_maintenance < MAINTENANCE_APPLY_SEC:
+                    continue
+                last_maintenance = now
+                _run_apply_once("subscribe:maintenance")
 
         except Exception:
             pass
