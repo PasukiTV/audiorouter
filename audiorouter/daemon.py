@@ -102,6 +102,18 @@ def wait_for_pipewire(timeout: float = 15.0) -> bool:
     return False
 
 
+def _run_apply_once() -> None:
+    try:
+        apply_once()
+    except Exception:
+        pass
+
+
+def _is_new_sink_input_event_line(line: str) -> bool:
+    txt = line.lower()
+    return "on sink-input" in txt and "'new'" in txt
+
+
 def run_daemon():
     # Single-instance guard
     if not _try_acquire_daemon_lock():
@@ -112,10 +124,7 @@ def run_daemon():
         return
 
     # 2) Apply once initially
-    try:
-        apply_once()
-    except Exception:
-        pass
+    _run_apply_once()
 
     # 3) Event-driven if pulsectl is available, otherwise fallback subscribe
     try:
@@ -138,14 +147,17 @@ def run_daemon():
 
                 def cb(_ev):
                     nonlocal last
+
+                    ev_type = str(getattr(_ev, "t", "")).lower()
+                    if ev_type == "new":
+                        _run_apply_once()
+                        return
+
                     now = time.monotonic()
                     if now - last < EVENT_DEBOUNCE_SEC:
                         return
                     last = now
-                    try:
-                        apply_once()
-                    except Exception:
-                        pass
+                    _run_apply_once()
 
                 pulse.event_callback_set(cb)
 
@@ -193,15 +205,15 @@ def _fallback_subscribe():
                 if not line:
                     break
 
+                if _is_new_sink_input_event_line(line):
+                    _run_apply_once()
+                    continue
+
                 now = time.monotonic()
                 if now - last < EVENT_DEBOUNCE_SEC:
                     continue
                 last = now
-
-                try:
-                    apply_once()
-                except Exception:
-                    pass
+                _run_apply_once()
 
         except Exception:
             pass
