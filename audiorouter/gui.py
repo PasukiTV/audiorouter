@@ -114,8 +114,8 @@ class MainWindow(Adw.ApplicationWindow):
         btn_policy_remove = Gtk.Button(label="Remove System Sound Policy")
         btn_policy_remove.set_tooltip_text("Entfernt die installierte Systemsound-Policy und startet pipewire-pulse neu.")
         btn_policy_remove.connect("clicked", lambda *_: self.remove_system_sound_policy())
-        btn_policy_delete_file = Gtk.Button(label="Delete Daemon Rules File")
-        btn_policy_delete_file.set_tooltip_text("Löscht nur die Policy-Datei (ohne automatische Neuinstallation).")
+        btn_policy_delete_file = Gtk.Button(label="Delete audiorouter-deamon.lock")
+        btn_policy_delete_file.set_tooltip_text("Löscht die Lock-Datei audiorouter-deamon.lock im Cache-Ordner.")
         btn_policy_delete_file.connect("clicked", lambda *_: self.delete_daemon_rules_file())
         file_buttons.append(btn_open_rules)
         file_buttons.append(btn_open_vsinks)
@@ -404,11 +404,24 @@ class MainWindow(Adw.ApplicationWindow):
     def delete_daemon_rules_file(self) -> None:
         def _worker():
             try:
-                path = remove_system_sound_policy()
-                title = "Daemon rules file deleted"
-                msg = f"Deleted file:\n{path}"
+                cache_dir = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
+                requested = cache_dir / "audiorouter-deamon.lock"
+                legacy = cache_dir / "audiorouter-daemon.lock"
+
+                deleted: list[Path] = []
+                for path in (requested, legacy):
+                    if path.exists():
+                        path.unlink()
+                        deleted.append(path)
+
+                if deleted:
+                    title = "audiorouter-deamon.lock deleted"
+                    msg = "Deleted file(s):\n" + "\n".join(str(p) for p in deleted)
+                else:
+                    title = "No lock file found"
+                    msg = f"Neither of these files exists:\n{requested}\n{legacy}"
             except Exception as exc:
-                title = "Delete daemon rules file error"
+                title = "Delete audiorouter-deamon.lock error"
                 msg = str(exc)
 
             GLib.idle_add(self.refresh_all)
