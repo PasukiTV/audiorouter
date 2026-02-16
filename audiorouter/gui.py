@@ -173,7 +173,12 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.bus_list = Gtk.ListBox()
         self.bus_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        left.append(self.bus_list)
+        buses_scroll = Gtk.ScrolledWindow()
+        buses_scroll.set_vexpand(True)
+        buses_scroll.set_hexpand(True)
+        buses_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        buses_scroll.set_child(self.bus_list)
+        left.append(buses_scroll)
 
         add_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.entry_bus_label = Gtk.Entry(placeholder_text="Browser")
@@ -191,6 +196,13 @@ class MainWindow(Adw.ApplicationWindow):
         right_title = Gtk.Label(label="Running application streams", xalign=0)
         right_title.add_css_class("title-3")
         right.append(right_title)
+
+        stream_filter_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.entry_stream_filter = Gtk.Entry()
+        self.entry_stream_filter.set_placeholder_text("Filter streams (app, binary, media)")
+        self.entry_stream_filter.connect("changed", lambda *_: self.refresh_streams())
+        stream_filter_row.append(self.entry_stream_filter)
+        right.append(stream_filter_row)
 
         streams_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
                                  margin_top=2, margin_bottom=2, margin_start=0, margin_end=6)
@@ -217,7 +229,12 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.stream_list = Gtk.ListBox()
         self.stream_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        right.append(self.stream_list)
+        streams_scroll = Gtk.ScrolledWindow()
+        streams_scroll.set_vexpand(True)
+        streams_scroll.set_hexpand(True)
+        streams_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        streams_scroll.set_child(self.stream_list)
+        right.append(streams_scroll)
 
 
         apply_once()
@@ -521,13 +538,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def on_autostart_toggled(self, btn: Gtk.CheckButton):
         state = btn.get_active()
-        print("AUTOSTART TOGGLED:", state)
-
         if state:
-            print("-> enable()")
             autostart_enable()
         else:
-            print("-> disable()")
             autostart_disable()
 
 
@@ -655,12 +668,24 @@ class MainWindow(Adw.ApplicationWindow):
         inputs = pa.list_sink_inputs()
 
         # Filter loopbacks (routing internals)
-        filtered = []
-        for i in inputs:
-            props = i.get("props", {})
-            if not props or not is_internal_loopback(i):
-                filtered.append(i)
-        inputs = filtered
+        inputs = [i for i in inputs if (not i.get("props", {})) or not is_internal_loopback(i)]
+
+        # Optional stream text filter (app/binary/media)
+        stream_query = self.entry_stream_filter.get_text().strip().lower() if hasattr(self, "entry_stream_filter") else ""
+        if stream_query:
+            visible = []
+            for inp in inputs:
+                props = inp.get("props", {})
+                haystack = " ".join([
+                    str(props.get("application.name") or ""),
+                    str(props.get("pipewire.access.portal.app_id") or ""),
+                    str(props.get("application.process.binary") or ""),
+                    str(props.get("media.name") or ""),
+                    str(inp.get("id") or ""),
+                ]).lower()
+                if stream_query in haystack:
+                    visible.append(inp)
+            inputs = visible
 
         if not inputs:
             row = Gtk.ListBoxRow()
