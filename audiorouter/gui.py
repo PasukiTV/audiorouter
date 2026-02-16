@@ -197,13 +197,6 @@ class MainWindow(Adw.ApplicationWindow):
         right_title.add_css_class("title-3")
         right.append(right_title)
 
-        stream_filter_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.entry_stream_filter = Gtk.Entry()
-        self.entry_stream_filter.set_placeholder_text("Filter streams (app, binary, media)")
-        self.entry_stream_filter.connect("changed", lambda *_: self.refresh_streams())
-        stream_filter_row.append(self.entry_stream_filter)
-        right.append(stream_filter_row)
-
         streams_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
                                  margin_top=2, margin_bottom=2, margin_start=0, margin_end=6)
         hdr_stream = Gtk.Label(label="Stream", xalign=0)
@@ -323,12 +316,12 @@ class MainWindow(Adw.ApplicationWindow):
             self.btn_policy_toggle.set_label("System Sound Policy entfernen")
             self.btn_policy_toggle.remove_css_class("suggested-action")
             self.btn_policy_toggle.add_css_class("destructive-action")
-            self.btn_policy_toggle.set_tooltip_text("Entfernt die Systemsound-Policy und startet PipeWire/Pulse neu.")
+            self.btn_policy_toggle.set_tooltip_text("Entfernt die Systemsound-Policy (route system sounds to vsink.system) und startet PipeWire/Pulse neu.")
         else:
             self.btn_policy_toggle.set_label("System Sound Policy installieren")
             self.btn_policy_toggle.remove_css_class("destructive-action")
             self.btn_policy_toggle.add_css_class("suggested-action")
-            self.btn_policy_toggle.set_tooltip_text("Installiert die Systemsound-Policy und startet PipeWire/Pulse neu.")
+            self.btn_policy_toggle.set_tooltip_text("Installiert die Systemsound-Policy (route system sounds to vsink.system) und startet PipeWire/Pulse neu.")
 
     def toggle_system_sound_policy(self) -> None:
         self._apply_system_policy_async(not system_sound_policy_installed())
@@ -473,10 +466,20 @@ class MainWindow(Adw.ApplicationWindow):
                 return
             time.sleep(0.2)
 
+    def _ensure_system_bus_exists(self) -> None:
+        cfg = load_config()
+        cfg.setdefault("buses", [])
+        if any((b.get("name") == "vsink.system") for b in cfg.get("buses", [])):
+            return
+        cfg["buses"].append({"name": "vsink.system", "label": "System", "route_to": "default"})
+        save_config(cfg)
+        apply_once()
+
     def _apply_system_policy_async(self, install: bool) -> None:
         def _worker():
             try:
                 if install:
+                    self._ensure_system_bus_exists()
                     path = install_system_sound_policy("vsink.system")
                     self._reload_audio_stack_and_reapply()
                     msg = f"Policy installed:\n{path}\n\nPipeWire-Pulse was restarted."
@@ -669,23 +672,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Filter loopbacks (routing internals)
         inputs = [i for i in inputs if (not i.get("props", {})) or not is_internal_loopback(i)]
-
-        # Optional stream text filter (app/binary/media)
-        stream_query = self.entry_stream_filter.get_text().strip().lower() if hasattr(self, "entry_stream_filter") else ""
-        if stream_query:
-            visible = []
-            for inp in inputs:
-                props = inp.get("props", {})
-                haystack = " ".join([
-                    str(props.get("application.name") or ""),
-                    str(props.get("pipewire.access.portal.app_id") or ""),
-                    str(props.get("application.process.binary") or ""),
-                    str(props.get("media.name") or ""),
-                    str(inp.get("id") or ""),
-                ]).lower()
-                if stream_query in haystack:
-                    visible.append(inp)
-            inputs = visible
 
         if not inputs:
             row = Gtk.ListBoxRow()
