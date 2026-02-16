@@ -9,7 +9,7 @@ import re
 import threading
 from pathlib import Path
 
-from .core import apply_once, route_sink_input_now
+from .core import apply_once, route_sink_input_now, route_source_output_now
 from . import pactl as pa
 
 _STOP = False
@@ -118,6 +118,7 @@ def _is_new_sink_input_event_line(line: str) -> bool:
 
 
 _SINK_INPUT_ID_RE = re.compile(r"sink-input\s+#(\d+)", re.IGNORECASE)
+_SOURCE_OUTPUT_ID_RE = re.compile(r"source-output\s+#(\d+)", re.IGNORECASE)
 
 
 def _sink_input_id_from_pulsectl_event(ev) -> str:
@@ -134,6 +135,37 @@ def _sink_input_id_from_pulsectl_event(ev) -> str:
 def _sink_input_id_from_subscribe_line(line: str) -> str:
     m = _SINK_INPUT_ID_RE.search(line)
     return m.group(1) if m else ""
+
+
+def _is_new_source_output_event_line(line: str) -> bool:
+    txt = line.lower()
+    return "on source-output" in txt and "'new'" in txt
+
+
+def _source_output_id_from_pulsectl_event(ev) -> str:
+    idx = getattr(ev, "index", None)
+    if idx is None:
+        return ""
+    try:
+        return str(int(idx))
+    except Exception:
+        txt = str(idx).strip()
+        return txt if txt.isdigit() else ""
+
+
+def _source_output_id_from_subscribe_line(line: str) -> str:
+    m = _SOURCE_OUTPUT_ID_RE.search(line)
+    return m.group(1) if m else ""
+
+
+def _try_route_new_source_output_immediately(source_output_id: str, reason: str) -> None:
+    sid = str(source_output_id).strip()
+    if not sid:
+        return
+    try:
+        route_source_output_now(sid)
+    except Exception:
+        pass
 
 
 def _try_route_new_input_immediately(sink_input_id: str, reason: str) -> None:
@@ -199,6 +231,30 @@ def _watch_new_sink_inputs(poll_sec: float = 0.01) -> None:
         time.sleep(poll_sec)
 
 
+
+
+def _scan_source_output_ids() -> set[str]:
+    ids: set[str] = set()
+    try:
+        for out in pa.list_source_outputs():
+            sid = str(out.get("id", "")).strip()
+            if sid:
+                ids.add(sid)
+    except Exception:
+        return set()
+    return ids
+
+
+def _watch_new_source_outputs(poll_sec: float = 0.01) -> None:
+    seen = _scan_source_output_ids()
+    while not _STOP:
+        current = _scan_source_output_ids()
+        new_ids = current - seen
+        for sid in sorted(new_ids):
+            _try_route_new_source_output_immediately(sid, "poll:new")
+        seen = current
+        time.sleep(poll_sec)
+
 def run_daemon():
 
     # Single-instance guard
@@ -214,6 +270,7 @@ def run_daemon():
 
     # 2b) Start active new-input watcher as safety net for delayed event backends
     threading.Thread(target=_watch_new_sink_inputs, name="audiorouter-new-input-watch", daemon=True).start()
+    threading.Thread(target=_watch_new_source_outputs, name="audiorouter-new-source-output-watch", daemon=True).start()
 
     # 3) Event-driven if pulsectl is available, otherwise fallback subscribe
     try:
@@ -233,13 +290,17 @@ def run_daemon():
                 last_maintenance = 0.0
 
                 # instead of "all": only what we need
-                pulse.event_mask_set("sink_input")
+                pulse.event_mask_set("sink_input", "source_output")
 
                 def cb(_ev):
                     nonlocal last, last_maintenance
 
                     if _is_new_pulsectl_event(_ev):
-                        _try_route_new_input_immediately(_sink_input_id_from_pulsectl_event(_ev), "pulsectl:new")
+                        facility = str(getattr(_ev, "facility", "")).lower()
+                        if "source_output" in facility:
+                            _try_route_new_source_output_immediately(_source_output_id_from_pulsectl_event(_ev), "pulsectl:new")
+                        else:
+                            _try_route_new_input_immediately(_sink_input_id_from_pulsectl_event(_ev), "pulsectl:new")
                         _run_apply_once("pulsectl:new")
                         return
 
@@ -304,6 +365,11 @@ def _fallback_subscribe():
 
                 if _is_new_sink_input_event_line(line):
                     _try_route_new_input_immediately(_sink_input_id_from_subscribe_line(line), "subscribe:new")
+                    _run_apply_once("subscribe:new")
+                    continue
+
+                if _is_new_source_output_event_line(line):
+                    _try_route_new_source_output_immediately(_source_output_id_from_subscribe_line(line), "subscribe:new")
                     _run_apply_once("subscribe:new")
                     continue
 

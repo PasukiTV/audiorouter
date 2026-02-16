@@ -162,6 +162,63 @@ def route_sink_input_now(sink_input_id: str) -> bool:
 
     return False
 
+
+
+def route_source_output_now(source_output_id: str) -> bool:
+    """
+    Fast path for freshly created source-outputs (record/capture streams).
+    Routes microphone input streams to configured target monitor sources.
+    """
+    sid = str(source_output_id).strip()
+    if not sid:
+        return False
+
+    cfg = load_config()
+    mic_routes = cfg.get("mic_routes", [])
+    if not mic_routes:
+        return False
+
+    target_out = None
+    for out in pa.list_source_outputs():
+        if str(out.get("id", "")).strip() == sid:
+            target_out = out
+            break
+
+    if not target_out:
+        return False
+
+    props = target_out.get("props", {})
+    app = (props.get("application.name") or "").lower()
+    bin_ = (props.get("application.process.binary") or "").lower()
+    aid = (props.get("pipewire.access.portal.app_id") or "").lower()
+
+    for r in mic_routes:
+        match = r.get("match", {})
+        tgt_bus = (r.get("target_bus") or "").strip()
+        if not tgt_bus:
+            continue
+
+        target_source = f"{tgt_bus}.monitor"
+        if not pa.source_exists(target_source):
+            continue
+
+        ok = True
+        if "binary" in match and match["binary"].lower() not in bin_:
+            ok = False
+        if "app" in match and match["app"].lower() not in app:
+            ok = False
+        if "app_id" in match and match["app_id"].lower() not in aid:
+            ok = False
+
+        if ok:
+            try:
+                pa.move_source_output(sid, target_source)
+                return True
+            except Exception:
+                return False
+
+    return False
+
 def apply_once() -> None:
     cfg = load_config()
     st = load_state()
@@ -172,6 +229,7 @@ def apply_once() -> None:
 
     buses = cfg.get("buses", [])
     rules = cfg.get("rules", [])
+    mic_routes = cfg.get("mic_routes", [])
 
     current_bus_names = {b["name"] for b in buses}
 
@@ -330,4 +388,49 @@ def apply_once() -> None:
                 _move_input_quietly(sid, system_bus, mute_sec=SYSTEM_STREAM_MOVE_MUTE_SEC)
             except Exception:
                 pass
+
+    # ---------------------------------------------------------
+    # 6) Apply microphone (source-output) routes
+    # ---------------------------------------------------------
+    if mic_routes:
+        outs = pa.list_source_outputs()
+        src_name_by_id = {str(src.get("id", "")).strip(): str(src.get("name", "")) for src in pa.list_sources()}
+
+        for out in outs:
+            props = out.get("props", {})
+            app = (props.get("application.name") or "").lower()
+            bin_ = (props.get("application.process.binary") or "").lower()
+            aid = (props.get("pipewire.access.portal.app_id") or "").lower()
+
+            for r in mic_routes:
+                match = r.get("match", {})
+                tgt_bus = (r.get("target_bus") or "").strip()
+                if not tgt_bus:
+                    continue
+
+                target_source = f"{tgt_bus}.monitor"
+                if not pa.source_exists(target_source):
+                    continue
+
+                ok = True
+                if "binary" in match and match["binary"].lower() not in bin_:
+                    ok = False
+                if "app" in match and match["app"].lower() not in app:
+                    ok = False
+                if "app_id" in match and match["app_id"].lower() not in aid:
+                    ok = False
+
+                if not ok:
+                    continue
+
+                out_id = str(out.get("id", ""))
+                source_id = str(out.get("source_id", "")).strip()
+                if src_name_by_id.get(source_id, "") == target_source:
+                    break
+
+                try:
+                    pa.move_source_output(out_id, target_source)
+                except Exception:
+                    pass
+                break
     save_state(st)

@@ -34,6 +34,7 @@ def collect_debug_snapshot() -> str:
         ("sources_short", ["list", "short", "sources"]),
         ("modules_short", ["list", "short", "modules"]),
         ("sink_inputs", ["list", "sink-inputs"]),
+        ("source_outputs", ["list", "source-outputs"]),
     ]
     blocks = []
     for title, cmd in sections:
@@ -229,6 +230,48 @@ def load_loopback(source_name: str, sink_name: str, latency_msec: int = 30) -> s
 
 def move_sink_input(sink_input_id: str, target_sink: str) -> None:
     pactl("move-sink-input", sink_input_id, target_sink)
+
+
+def move_source_output(source_output_id: str, target_source: str) -> None:
+    pactl("move-source-output", source_output_id, target_source)
+
+
+# list_source_outputs: DE/EN parser for microphone/capture streams
+def list_source_outputs() -> List[Dict[str, Any]]:
+    out = try_pactl("list", "source-outputs")
+    items: List[Dict[str, Any]] = []
+    cur: Optional[Dict[str, Any]] = None
+    in_props = False
+
+    for raw in out.splitlines():
+        line = raw.strip()
+
+        if line.startswith("Source Output #") or line.startswith("Quell-Ausgabe #"):
+            if cur:
+                items.append(cur)
+            cur = {"id": line.split("#", 1)[1].strip(), "props": {}}
+            in_props = False
+            continue
+
+        if cur is None:
+            continue
+
+        if line.startswith("Eigenschaften:") or line.startswith("Properties:"):
+            in_props = True
+            continue
+
+        if line.startswith("Source:") or line.startswith("Quelle:"):
+            cur["source_id"] = line.split(":", 1)[1].strip()
+            continue
+
+        if in_props and "=" in line:
+            k, v = line.split("=", 1)
+            cur["props"][k.strip()] = v.strip().strip('"')
+
+    if cur:
+        items.append(cur)
+
+    return items
 
 # list_sink_inputs: DE/EN + nur in Eigenschaften/Properties parsen
 def list_sink_inputs() -> List[Dict[str, Any]]:
