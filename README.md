@@ -61,6 +61,26 @@ Run AudioRouter:
 
 ---
 
+
+## Flathub submission (maintainer notes)
+
+This repository now includes a Flathub-oriented manifest at:
+
+    flatpak/de.pasuki.audiorouter.flathub.yml
+
+Recommended release flow:
+
+1. Create a new upstream Git tag (e.g. `v0.1.0`).
+2. Update the `tag` and `commit` in the Flathub manifest (or run `scripts/prepare_flathub_release.sh <tag>`).
+3. Open a PR to `flathub/flathub` with that manifest.
+4. Address Flathub review feedback (permissions/sources/metadata).
+
+A detailed checklist is available in:
+
+    docs/flathub.md
+
+---
+
 ## Background Daemon
 
 AudioRouter uses a background daemon to apply audio routing rules automatically.

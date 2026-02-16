@@ -40,6 +40,10 @@
 
 
 
+  <releases>
+    <release version="0.1.0" date="2026-02-16"/>
+  </releases>
+
   <launchable type="desktop-id">de.pasuki.audiorouter.desktop</launchable>
 
   <provides>
