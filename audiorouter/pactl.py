@@ -34,6 +34,7 @@ def collect_debug_snapshot() -> str:
         ("sources_short", ["list", "short", "sources"]),
         ("modules_short", ["list", "short", "modules"]),
         ("sink_inputs", ["list", "sink-inputs"]),
+        ("source_outputs", ["list", "source-outputs"]),
     ]
     blocks = []
     for title, cmd in sections:
@@ -79,6 +80,29 @@ def list_sink_descriptions() -> Dict[str, str]:
 
     return mapping
 
+
+
+def list_source_descriptions() -> Dict[str, str]:
+    out = try_pactl("list", "sources")
+    mapping: Dict[str, str] = {}
+    cur_name = ""
+
+    for raw in out.splitlines():
+        line = raw.strip()
+
+        if line.startswith("Name:"):
+            cur_name = line.split(":", 1)[1].strip()
+            if cur_name and cur_name not in mapping:
+                mapping[cur_name] = cur_name
+            continue
+
+        if line.startswith("Description:") or line.startswith("Beschreibung:"):
+            desc = line.split(":", 1)[1].strip()
+            if cur_name and desc:
+                mapping[cur_name] = desc
+
+    return mapping
+
 def list_sources() -> List[Dict[str, str]]:
     out = try_pactl("list", "short", "sources")
     srcs = []
@@ -96,6 +120,14 @@ def list_modules() -> List[Dict[str, str]]:
         if len(parts) >= 2:
             mods.append({"id": parts[0], "name": parts[1], "args": parts[2] if len(parts) > 2 else ""})
     return mods
+
+
+def ensure_module_loaded(module_name: str, *module_args: str) -> None:
+    for m in list_modules():
+        if m.get("name") == module_name:
+            return
+    try_pactl("load-module", module_name, *module_args)
+
 
 def sink_exists(name: str) -> bool:
     return any(s["name"] == name for s in list_sinks())
@@ -115,6 +147,17 @@ def set_sink_mute(sink_name: str, muted: bool) -> None:
 
 def set_sink_input_mute(sink_input_id: str, muted: bool) -> None:
     try_pactl("set-sink-input-mute", sink_input_id, "1" if muted else "0")
+
+
+def tag_system_sink(sink_name: str = "vsink.system") -> None:
+    """
+    Hint Pulse/PipeWire to place event/notification streams on the system bus
+    immediately at stream creation time.
+    """
+    if not sink_exists(sink_name):
+        return
+    # include both role names commonly used by Pulse/PipeWire clients
+    try_pactl("set-sink-properties", sink_name, "device.intended_roles=event notification")
 
 
 def unload_module(module_id: str) -> None:
@@ -151,8 +194,26 @@ def load_null_sink(bus_name: str, label: str) -> str:
     except Exception:
         pass
 
+    if bus_name == "vsink.system":
+        tag_system_sink(bus_name)
+
     return module_id
 
+
+
+
+def current_loopback_sink_for_source(source_name: str) -> str:
+    """Return the current loopback sink for a given source (first match), or ""."""
+    for m in list_modules():
+        if m.get("name") != "module-loopback":
+            continue
+        args = m.get("args", "") or ""
+        if f"source={source_name}" not in args:
+            continue
+        for tok in args.split():
+            if tok.startswith("sink="):
+                return tok.split("=", 1)[1]
+    return ""
 
 def loopback_exists(source_name: str, sink_name: str) -> bool:
     for m in list_modules():
@@ -207,6 +268,48 @@ def load_loopback(source_name: str, sink_name: str, latency_msec: int = 30) -> s
 
 def move_sink_input(sink_input_id: str, target_sink: str) -> None:
     pactl("move-sink-input", sink_input_id, target_sink)
+
+
+def move_source_output(source_output_id: str, target_source: str) -> None:
+    pactl("move-source-output", source_output_id, target_source)
+
+
+# list_source_outputs: DE/EN parser for microphone/capture streams
+def list_source_outputs() -> List[Dict[str, Any]]:
+    out = try_pactl("list", "source-outputs")
+    items: List[Dict[str, Any]] = []
+    cur: Optional[Dict[str, Any]] = None
+    in_props = False
+
+    for raw in out.splitlines():
+        line = raw.strip()
+
+        if line.startswith("Source Output #") or line.startswith("Quell-Ausgabe #"):
+            if cur:
+                items.append(cur)
+            cur = {"id": line.split("#", 1)[1].strip(), "props": {}}
+            in_props = False
+            continue
+
+        if cur is None:
+            continue
+
+        if line.startswith("Eigenschaften:") or line.startswith("Properties:"):
+            in_props = True
+            continue
+
+        if line.startswith("Source:") or line.startswith("Quelle:"):
+            cur["source_id"] = line.split(":", 1)[1].strip()
+            continue
+
+        if in_props and "=" in line:
+            k, v = line.split("=", 1)
+            cur["props"][k.strip()] = v.strip().strip('"')
+
+    if cur:
+        items.append(cur)
+
+    return items
 
 # list_sink_inputs: DE/EN + nur in Eigenschaften/Properties parsen
 def list_sink_inputs() -> List[Dict[str, Any]]:
