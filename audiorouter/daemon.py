@@ -6,6 +6,7 @@ import signal
 import subprocess
 import time
 import re
+import threading
 from pathlib import Path
 
 from .core import apply_once, route_sink_input_now
@@ -173,6 +174,35 @@ def _is_new_pulsectl_event(ev) -> bool:
         return False
 
 
+def _scan_sink_input_ids() -> set[str]:
+    ids: set[str] = set()
+    try:
+        for inp in pa.list_sink_inputs():
+            sid = str(inp.get("id", "")).strip()
+            if sid:
+                ids.add(sid)
+    except Exception:
+        return set()
+    return ids
+
+
+def _watch_new_sink_inputs(poll_sec: float = 0.02) -> None:
+    """
+    Safety net: actively detect fresh sink-input IDs so short-lived system sounds
+    can be routed even when event backends emit only delayed/"other" updates.
+    """
+    trace(f"new_input_watcher_start poll_sec={poll_sec}")
+    seen = _scan_sink_input_ids()
+    while not _STOP:
+        current = _scan_sink_input_ids()
+        new_ids = current - seen
+        for sid in sorted(new_ids):
+            _try_route_new_input_immediately(sid, "poll:new")
+        # Keep memory bounded to currently existing IDs
+        seen = current
+        time.sleep(poll_sec)
+
+
 def run_daemon():
     trace("daemon_start")
 
@@ -188,6 +218,9 @@ def run_daemon():
 
     # 2) Apply once initially
     _run_apply_once("startup")
+
+    # 2b) Start active new-input watcher as safety net for delayed event backends
+    threading.Thread(target=_watch_new_sink_inputs, name="audiorouter-new-input-watch", daemon=True).start()
 
     # 3) Event-driven if pulsectl is available, otherwise fallback subscribe
     try:
