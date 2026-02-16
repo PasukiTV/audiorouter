@@ -117,6 +117,16 @@ def set_sink_input_mute(sink_input_id: str, muted: bool) -> None:
     try_pactl("set-sink-input-mute", sink_input_id, "1" if muted else "0")
 
 
+def tag_system_sink(sink_name: str = "vsink.system") -> None:
+    """
+    Hint Pulse/PipeWire to place event/notification streams on the system bus
+    immediately at stream creation time.
+    """
+    if not sink_exists(sink_name):
+        return
+    try_pactl("set-sink-properties", sink_name, "device.intended_roles=event")
+
+
 def unload_module(module_id: str) -> None:
     if module_id:
         try_pactl("unload-module", module_id)
@@ -150,6 +160,9 @@ def load_null_sink(bus_name: str, label: str) -> str:
         )
     except Exception:
         pass
+
+    if bus_name == "vsink.system":
+        tag_system_sink(bus_name)
 
     return module_id
 

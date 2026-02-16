@@ -132,6 +132,10 @@ def apply_once() -> None:
             mid = pa.load_null_sink(name, label)
             st["bus_modules"][name] = mid
 
+        # Keep role metadata on existing system sink too (important after upgrades).
+        if name == "vsink.system":
+            pa.tag_system_sink(name)
+
     # ---------------------------------------------------------
     # 3) Routing logic (NO LOOPBACK CHURN)
     # ---------------------------------------------------------
