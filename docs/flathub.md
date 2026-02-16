@@ -12,6 +12,16 @@ This checklist is for publishing `de.pasuki.audiorouter` to Flathub.
 
 Use: `flatpak/de.pasuki.audiorouter.flathub.yml`
 
+Fast path (recommended):
+
+```bash
+scripts/prepare_flathub_release.sh v0.1.0
+```
+
+This script resolves the tag commit and updates `tag` + `commit` in the manifest.
+
+Manual path:
+
 - Update `tag` and `commit` under the `audiorouter` module source.
 - Keep permissions as minimal as possible.
 - Keep all sources reproducible and pinned.

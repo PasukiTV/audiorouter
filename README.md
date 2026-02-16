@@ -71,7 +71,7 @@ This repository now includes a Flathub-oriented manifest at:
 Recommended release flow:
 
 1. Create a new upstream Git tag (e.g. `v0.1.0`).
-2. Update the `tag` and `commit` in the Flathub manifest.
+2. Update the `tag` and `commit` in the Flathub manifest (or run `scripts/prepare_flathub_release.sh <tag>`).
 3. Open a PR to `flathub/flathub` with that manifest.
 4. Address Flathub review feedback (permissions/sources/metadata).
 
