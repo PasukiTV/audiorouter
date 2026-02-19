@@ -6,11 +6,28 @@ import sys
 
 from .system_policy import install_system_sound_policy, remove_system_sound_policy, restart_pipewire_pulse
 from . import pactl as pa
+from .companion import push_sink_state
+from .config import load_config
 
 # Make bundled modules importable inside Flatpak (if you bundle extra libs there)
 LIBDIR = "/app/lib/audiorouter"
 if os.path.isdir(LIBDIR) and LIBDIR not in sys.path:
     sys.path.insert(0, LIBDIR)
+
+
+
+def _push_companion_state_quiet(sink_name: str) -> None:
+    try:
+        cfg = load_config()
+        push_sink_state(
+            cfg,
+            sink_name=sink_name,
+            muted=pa.get_sink_mute(sink_name),
+            volume_percent=pa.get_sink_volume_percent(sink_name),
+        )
+    except Exception:
+        # Companion sync is optional and must not break sink control.
+        pass
 
 
 def main():
@@ -38,6 +55,7 @@ def main():
                 print("Missing --value for action set-volume", file=sys.stderr)
                 sys.exit(2)
             pa.set_sink_volume(sink_name, value)
+            _push_companion_state_quiet(sink_name)
             print(f"Volume set: {sink_name} -> {value}")
             return
 
@@ -46,22 +64,26 @@ def main():
                 print("Missing --value for action change-volume", file=sys.stderr)
                 sys.exit(2)
             pa.change_sink_volume(sink_name, value)
+            _push_companion_state_quiet(sink_name)
             print(f"Volume changed: {sink_name} {value}")
             return
 
         if action == "mute":
             pa.set_sink_mute(sink_name, True)
+            _push_companion_state_quiet(sink_name)
             print(f"Muted: {sink_name}")
             return
 
         if action == "unmute":
             pa.set_sink_mute(sink_name, False)
+            _push_companion_state_quiet(sink_name)
             print(f"Unmuted: {sink_name}")
             return
 
         if action == "toggle-mute":
             is_muted = pa.get_sink_mute(sink_name)
             pa.set_sink_mute(sink_name, not is_muted)
+            _push_companion_state_quiet(sink_name)
             print(f"Mute toggled: {sink_name} -> {'muted' if not is_muted else 'unmuted'}")
             return
 

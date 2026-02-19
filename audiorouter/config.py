@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
+from .companion import normalize_companion_config
+
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "audiorouter"
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "audiorouter"
 
@@ -23,6 +25,7 @@ DEFAULT_CONFIG = {
     "rules": [],
     "mic_routes": [],
     "input_routes": [],
+    "companion": normalize_companion_config(None),
 }
 
 
@@ -47,6 +50,7 @@ def _normalize_config(cfg: Dict[str, Any] | None) -> Dict[str, Any]:
         "rules": cfg.get("rules", []) if isinstance(cfg.get("rules", []), list) else [],
         "mic_routes": cfg.get("mic_routes", []) if isinstance(cfg.get("mic_routes", []), list) else [],
         "input_routes": cfg.get("input_routes", []) if isinstance(cfg.get("input_routes", []), list) else [],
+        "companion": normalize_companion_config(cfg.get("companion", None)),
     }
 
 
@@ -65,6 +69,7 @@ def load_config() -> Dict[str, Any]:
                 INPUT_RULES_PATH,
                 legacy.get("input_routes", []) if isinstance(legacy, dict) else [],
             ),
+            "companion": legacy.get("companion", None) if isinstance(legacy, dict) else None,
         })
         # Only sync files when split migration is incomplete.
         if not (VSINKS_PATH.exists() and RULES_PATH.exists() and INPUT_RULES_PATH.exists()):
