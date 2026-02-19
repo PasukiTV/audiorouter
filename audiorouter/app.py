@@ -16,7 +16,7 @@ if os.path.isdir(LIBDIR) and LIBDIR not in sys.path:
 
 
 
-def _push_companion_state_quiet(sink_name: str, debug: bool = False) -> None:
+def _push_companion_state_quiet(sink_name: str, debug: bool = False, companion_key: str = "") -> None:
     try:
         cfg = load_config()
         lines = push_sink_state(
@@ -24,6 +24,7 @@ def _push_companion_state_quiet(sink_name: str, debug: bool = False) -> None:
             sink_name=sink_name,
             muted=pa.get_sink_mute(sink_name),
             volume_percent=pa.get_sink_volume_percent(sink_name),
+            var_key_override=companion_key,
         )
         if debug:
             for line in lines:
@@ -50,6 +51,7 @@ def main():
         action = ""
         value = ""
         companion_debug = ("--companion-debug" in sys.argv)
+        companion_key = ""
         for i, arg in enumerate(sys.argv):
             if arg == "--control-sink" and i + 1 < len(sys.argv):
                 sink_name = sys.argv[i + 1].strip()
@@ -57,6 +59,8 @@ def main():
                 action = sys.argv[i + 1].strip().lower()
             elif arg == "--value" and i + 1 < len(sys.argv):
                 value = sys.argv[i + 1].strip()
+            elif arg == "--companion-key" and i + 1 < len(sys.argv):
+                companion_key = sys.argv[i + 1].strip()
 
         if not sink_name:
             print("Missing --control-sink <sink_name>", file=sys.stderr)
@@ -70,7 +74,7 @@ def main():
                 print("Missing --value for action set-volume", file=sys.stderr)
                 sys.exit(2)
             pa.set_sink_volume(sink_name, value)
-            _push_companion_state_quiet(sink_name, debug=companion_debug)
+            _push_companion_state_quiet(sink_name, debug=companion_debug, companion_key=companion_key)
             print(f"Volume set: {sink_name} -> {value}")
             return
 
@@ -79,26 +83,26 @@ def main():
                 print("Missing --value for action change-volume", file=sys.stderr)
                 sys.exit(2)
             pa.change_sink_volume(sink_name, value)
-            _push_companion_state_quiet(sink_name, debug=companion_debug)
+            _push_companion_state_quiet(sink_name, debug=companion_debug, companion_key=companion_key)
             print(f"Volume changed: {sink_name} {value}")
             return
 
         if action == "mute":
             pa.set_sink_mute(sink_name, True)
-            _push_companion_state_quiet(sink_name, debug=companion_debug)
+            _push_companion_state_quiet(sink_name, debug=companion_debug, companion_key=companion_key)
             print(f"Muted: {sink_name}")
             return
 
         if action == "unmute":
             pa.set_sink_mute(sink_name, False)
-            _push_companion_state_quiet(sink_name, debug=companion_debug)
+            _push_companion_state_quiet(sink_name, debug=companion_debug, companion_key=companion_key)
             print(f"Unmuted: {sink_name}")
             return
 
         if action == "toggle-mute":
             is_muted = pa.get_sink_mute(sink_name)
             pa.set_sink_mute(sink_name, not is_muted)
-            _push_companion_state_quiet(sink_name, debug=companion_debug)
+            _push_companion_state_quiet(sink_name, debug=companion_debug, companion_key=companion_key)
             print(f"Mute toggled: {sink_name} -> {'muted' if not is_muted else 'unmuted'}")
             return
 

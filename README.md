@@ -146,6 +146,10 @@ Debugging Companion sync from SSH/CLI:
     audiorouter --control-sink vsink.browser --action toggle-mute --companion-debug
     audiorouter --show-companion-log
 
+Optional: override variable key (useful to match existing variables like `defaultVol/defaultMute`):
+
+    audiorouter --control-sink "$(pactl get-default-sink)" --action toggle-mute --companion-key default --companion-debug
+
 Log file:
 
     ~/.local/state/audiorouter/companion-sync.log

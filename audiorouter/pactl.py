@@ -175,7 +175,7 @@ def get_sink_volume_percent(sink_name: str) -> int | None:
         return None
     try:
         value = int(match.group(1))
-        return max(0, min(150, value))
+        return max(0, min(100, value))
     except Exception:
         return None
 

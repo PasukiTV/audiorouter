@@ -79,6 +79,7 @@ def push_sink_state(
     sink_name: str,
     muted: bool | None = None,
     volume_percent: int | None = None,
+    var_key_override: str | None = None,
 ) -> List[str]:
     """
     Push sink state to Bitfocus Companion custom variables.
@@ -101,7 +102,7 @@ def push_sink_state(
         _log_line(lines[-1])
         return lines
 
-    key = sink_key_from_name(sink_name)
+    key = (var_key_override or "").strip() or sink_key_from_name(sink_name)
     vol_suffix = str(comp.get("volume_suffix", "Vol")).strip() or "Vol"
     mute_suffix = str(comp.get("mute_suffix", "Mute")).strip() or "Mute"
     timeout_s = _http_timeout(comp.get("timeout_sec", 2.0), 2.0)
@@ -109,8 +110,9 @@ def push_sink_state(
     lines.append(f"SYNC sink={sink_name} key={key} timeout={timeout_s}s")
 
     if volume_percent is not None:
+        safe_vol = max(0, min(100, int(volume_percent)))
         var_name = f"{key}{vol_suffix}"
-        lines.append(_post_var(base_url, var_name, str(volume_percent), timeout_s))
+        lines.append(_post_var(base_url, var_name, str(safe_vol), timeout_s))
 
     if muted is not None:
         var_name = f"{key}{mute_suffix}"
