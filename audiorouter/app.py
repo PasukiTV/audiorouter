@@ -5,6 +5,9 @@ import os
 import sys
 
 from .system_policy import install_system_sound_policy, remove_system_sound_policy, restart_pipewire_pulse
+from . import pactl as pa
+from .companion import companion_log_path, push_sink_state
+from .config import load_config
 
 # Make bundled modules importable inside Flatpak (if you bundle extra libs there)
 LIBDIR = "/app/lib/audiorouter"
@@ -12,7 +15,99 @@ if os.path.isdir(LIBDIR) and LIBDIR not in sys.path:
     sys.path.insert(0, LIBDIR)
 
 
+
+def _push_companion_state_quiet(sink_name: str, debug: bool = False) -> None:
+    try:
+        cfg = load_config()
+        lines = push_sink_state(
+            cfg,
+            sink_name=sink_name,
+            muted=pa.get_sink_mute(sink_name),
+            volume_percent=pa.get_sink_volume_percent(sink_name),
+        )
+        if debug:
+            for line in lines:
+                print(f"[companion] {line}")
+            print(f"[companion] log file: {companion_log_path()}")
+    except Exception as exc:
+        if debug:
+            print(f"[companion] sync exception: {exc}", file=sys.stderr)
+        # Companion sync is optional and must not break sink control.
+        pass
+
+
 def main():
+    if "--show-companion-log" in sys.argv:
+        path = companion_log_path()
+        if not path.exists():
+            print(f"Companion log not found: {path}")
+            return
+        print(path.read_text(encoding="utf-8"))
+        return
+
+    if "--control-sink" in sys.argv:
+        sink_name = ""
+        action = ""
+        value = ""
+        companion_debug = ("--companion-debug" in sys.argv)
+        for i, arg in enumerate(sys.argv):
+            if arg == "--control-sink" and i + 1 < len(sys.argv):
+                sink_name = sys.argv[i + 1].strip()
+            elif arg == "--action" and i + 1 < len(sys.argv):
+                action = sys.argv[i + 1].strip().lower()
+            elif arg == "--value" and i + 1 < len(sys.argv):
+                value = sys.argv[i + 1].strip()
+
+        if not sink_name:
+            print("Missing --control-sink <sink_name>", file=sys.stderr)
+            sys.exit(2)
+        if not pa.sink_exists(sink_name):
+            print(f"Sink not found: {sink_name}", file=sys.stderr)
+            sys.exit(1)
+
+        if action == "set-volume":
+            if not value:
+                print("Missing --value for action set-volume", file=sys.stderr)
+                sys.exit(2)
+            pa.set_sink_volume(sink_name, value)
+            _push_companion_state_quiet(sink_name, debug=companion_debug)
+            print(f"Volume set: {sink_name} -> {value}")
+            return
+
+        if action == "change-volume":
+            if not value:
+                print("Missing --value for action change-volume", file=sys.stderr)
+                sys.exit(2)
+            pa.change_sink_volume(sink_name, value)
+            _push_companion_state_quiet(sink_name, debug=companion_debug)
+            print(f"Volume changed: {sink_name} {value}")
+            return
+
+        if action == "mute":
+            pa.set_sink_mute(sink_name, True)
+            _push_companion_state_quiet(sink_name, debug=companion_debug)
+            print(f"Muted: {sink_name}")
+            return
+
+        if action == "unmute":
+            pa.set_sink_mute(sink_name, False)
+            _push_companion_state_quiet(sink_name, debug=companion_debug)
+            print(f"Unmuted: {sink_name}")
+            return
+
+        if action == "toggle-mute":
+            is_muted = pa.get_sink_mute(sink_name)
+            pa.set_sink_mute(sink_name, not is_muted)
+            _push_companion_state_quiet(sink_name, debug=companion_debug)
+            print(f"Mute toggled: {sink_name} -> {'muted' if not is_muted else 'unmuted'}")
+            return
+
+        print(
+            "Unknown or missing --action. Use: set-volume, change-volume, mute, unmute, toggle-mute",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     if "--install-system-policy" in sys.argv:
         target_sink = "vsink.system"
         for i, arg in enumerate(list(sys.argv)):

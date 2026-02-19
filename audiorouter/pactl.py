@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import re
 import subprocess
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
@@ -147,6 +148,36 @@ def set_sink_mute(sink_name: str, muted: bool) -> None:
 
 def set_sink_input_mute(sink_input_id: str, muted: bool) -> None:
     try_pactl("set-sink-input-mute", sink_input_id, "1" if muted else "0")
+
+
+def set_sink_volume(sink_name: str, volume: str) -> None:
+    pactl("set-sink-volume", sink_name, volume)
+
+
+def change_sink_volume(sink_name: str, delta: str) -> None:
+    pactl("set-sink-volume", sink_name, delta)
+
+
+def get_sink_mute(sink_name: str) -> bool:
+    out = try_pactl("get-sink-mute", sink_name).strip().lower()
+    # Handles EN/DE output from pactl, e.g. "Mute: yes" / "Stumm: ja".
+    if any(tok in out for tok in (" yes", ":yes", " ja", ":ja")):
+        return True
+    if any(tok in out for tok in (" no", ":no", " nein", ":nein")):
+        return False
+    return False
+
+
+def get_sink_volume_percent(sink_name: str) -> int | None:
+    out = try_pactl("get-sink-volume", sink_name)
+    match = re.search(r"(\d{1,3})%", out)
+    if not match:
+        return None
+    try:
+        value = int(match.group(1))
+        return max(0, min(100, value))
+    except Exception:
+        return None
 
 
 def tag_system_sink(sink_name: str = "vsink.system") -> None:

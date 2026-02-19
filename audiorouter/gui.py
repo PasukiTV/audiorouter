@@ -15,6 +15,7 @@ from .autostart import is_enabled as autostart_is_enabled, enable as autostart_e
 
 
 from .config import INPUT_RULES_PATH, RULES_PATH, VSINKS_PATH, load_config, save_config
+from .companion import normalize_companion_config, save_companion_config
 from . import pactl as pa
 # Apply changes immediately (no "Apply" button)
 from .core import apply_once
@@ -293,6 +294,10 @@ class MainWindow(Adw.ApplicationWindow):
         act_open_input_rules.connect("activate", lambda *_: self.open_json_editor(INPUT_RULES_PATH, "Input Device Rules"))
         actions.add_action(act_open_input_rules)
 
+        act_companion = Gio.SimpleAction.new("open_companion", None)
+        act_companion.connect("activate", lambda *_: self.open_companion_settings())
+        actions.add_action(act_companion)
+
         act_debug_snapshot = Gio.SimpleAction.new("debug_snapshot", None)
         act_debug_snapshot.connect("activate", lambda *_: self.open_debug_snapshot())
         actions.add_action(act_debug_snapshot)
@@ -311,6 +316,7 @@ class MainWindow(Adw.ApplicationWindow):
         cfg_menu.append("Open Routing Rules", "win.open_rules")
         cfg_menu.append("Open Input Device Rules", "win.open_input_rules")
         cfg_menu.append("Open vSinks", "win.open_vsinks")
+        cfg_menu.append("Companion", "win.open_companion")
 
         debug_menu = Gio.Menu()
         debug_menu.append("Audio Debug Snapshot", "win.debug_snapshot")
@@ -376,6 +382,79 @@ class MainWindow(Adw.ApplicationWindow):
     def toggle_system_sound_policy(self) -> None:
         self._apply_system_policy_async(not system_sound_policy_installed())
 
+
+    def open_companion_settings(self) -> None:
+        self.cfg = load_config()
+        comp = normalize_companion_config(self.cfg.get("companion", None))
+
+        editor = Gtk.Window(title="Companion Einstellungen")
+        editor.set_transient_for(self)
+        editor.set_modal(True)
+        editor.set_default_size(620, 360)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                       margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+        editor.set_child(root)
+
+        enabled = Gtk.CheckButton(label="Companion Sync aktivieren")
+        enabled.set_active(bool(comp.get("enabled", False)))
+        root.append(enabled)
+
+        lbl_url = Gtk.Label(label="Companion URL (z. B. http://192.168.1.10:8000)", xalign=0)
+        entry_url = Gtk.Entry()
+        entry_url.set_text(str(comp.get("url", "")))
+        root.append(lbl_url)
+        root.append(entry_url)
+
+        lbl_vol = Gtk.Label(label="Volume-Suffix (Variable: <sinkKey><suffix>)", xalign=0)
+        entry_vol = Gtk.Entry()
+        entry_vol.set_text(str(comp.get("volume_suffix", "Vol")))
+        root.append(lbl_vol)
+        root.append(entry_vol)
+
+        lbl_mute = Gtk.Label(label="Mute-Suffix (Variable: <sinkKey><suffix>)", xalign=0)
+        entry_mute = Gtk.Entry()
+        entry_mute.set_text(str(comp.get("mute_suffix", "Mute")))
+        root.append(lbl_mute)
+        root.append(entry_mute)
+
+        lbl_timeout = Gtk.Label(label="HTTP Timeout in Sekunden", xalign=0)
+        adj = Gtk.Adjustment(lower=0.5, upper=30.0, step_increment=0.5, page_increment=1.0, value=float(comp.get("timeout_sec", 2.0)))
+        spin_timeout = Gtk.SpinButton.new(adj, 0.5, 1)
+        root.append(lbl_timeout)
+        root.append(spin_timeout)
+
+        hint = Gtk.Label(
+            label="Beispiel-Endpoint: POST /api/custom-variable/browserVol/value?value=50",
+            xalign=0,
+        )
+        hint.add_css_class("dim-label")
+        root.append(hint)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_save = Gtk.Button(label="Save")
+        btn_close = Gtk.Button(label="Close")
+        actions.append(btn_save)
+        actions.append(btn_close)
+        root.append(actions)
+
+        def on_save(_btn):
+            cfg = load_config()
+            cfg = save_companion_config(cfg, {
+                "enabled": enabled.get_active(),
+                "url": entry_url.get_text().strip(),
+                "volume_suffix": entry_vol.get_text().strip(),
+                "mute_suffix": entry_mute.get_text().strip(),
+                "timeout_sec": spin_timeout.get_value(),
+            })
+            save_config(cfg)
+            self.cfg = cfg
+            self._show_message("Companion", "Companion-Einstellungen gespeichert.")
+
+        btn_save.connect("clicked", on_save)
+        btn_close.connect("clicked", lambda *_: editor.close())
+
+        editor.present()
 
     def open_json_editor(self, path: Path, title: str):
         # Ensure config files exist and are synced before opening editor.

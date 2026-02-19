@@ -94,6 +94,67 @@ Starting it multiple times will not create duplicate background processes.
 
 ---
 
+## Companion / Stream Deck integration (SSH)
+
+AudioRouter now supports direct sink control via CLI, which works well with
+Bitfocus Companion "Generic SSH" actions.
+
+Examples:
+
+    # mute a virtual sink
+    audiorouter --control-sink vsink.game --action mute
+
+    # unmute a virtual sink
+    audiorouter --control-sink vsink.game --action unmute
+
+    # toggle mute
+    audiorouter --control-sink vsink.game --action toggle-mute
+
+    # absolute volume
+    audiorouter --control-sink vsink.game --action set-volume --value 50%
+
+    # relative volume (step up/down)
+    audiorouter --control-sink vsink.game --action change-volume --value +5%
+    audiorouter --control-sink vsink.game --action change-volume --value -5%
+
+This lets you control individual `vsink.*` buses without custom shell scripts.
+If you run AudioRouter as Flatpak, run these commands through `flatpak run`
+for the app id.
+
+### Companion custom variables (optional)
+
+In the AudioRouter hamburger menu you can now open **Configuration → Companion**
+and configure your Companion base URL and variable suffixes.
+
+AudioRouter will then update variables via:
+
+    POST /api/custom-variable/<variableName>/value?value=<value>
+
+Variable name format is:
+
+    <sinkKey><suffix>
+
+Examples:
+- `vsink.browser` + suffix `Vol` => `browserVol`
+- `vsink.browser` + suffix `Mute` => `browserMute`
+
+Mute values are sent as `1` (muted) or `0` (unmuted).
+Volume values are sent as percent integer (e.g. `38`).
+
+Debugging Companion sync from SSH/CLI:
+
+    audiorouter --control-sink vsink.browser --action toggle-mute --companion-debug
+    audiorouter --show-companion-log
+
+Log file:
+
+    ~/.local/state/audiorouter/companion-sync.log
+
+If you see `Errno 101 Network is unreachable` inside Flatpak, ensure the app has
+network permission (`--share=network` in Flatpak finish-args).
+
+---
+
 ## Autostart
 
 Autostart can be enabled from within the GUI.
