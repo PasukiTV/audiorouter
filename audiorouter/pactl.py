@@ -149,6 +149,19 @@ def set_sink_input_mute(sink_input_id: str, muted: bool) -> None:
     try_pactl("set-sink-input-mute", sink_input_id, "1" if muted else "0")
 
 
+def set_sink_volume(sink_name: str, volume: str) -> None:
+    pactl("set-sink-volume", sink_name, volume)
+
+
+def change_sink_volume(sink_name: str, delta: str) -> None:
+    pactl("set-sink-volume", sink_name, delta)
+
+
+def get_sink_mute(sink_name: str) -> bool:
+    out = try_pactl("get-sink-mute", sink_name).strip().lower()
+    return "yes" in out
+
+
 def tag_system_sink(sink_name: str = "vsink.system") -> None:
     """
     Hint Pulse/PipeWire to place event/notification streams on the system bus

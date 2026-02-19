@@ -94,6 +94,35 @@ Starting it multiple times will not create duplicate background processes.
 
 ---
 
+## Companion / Stream Deck integration (SSH)
+
+AudioRouter now supports direct sink control via CLI, which works well with
+Bitfocus Companion "Generic SSH" actions.
+
+Examples:
+
+    # mute a virtual sink
+    audiorouter --control-sink vsink.game --action mute
+
+    # unmute a virtual sink
+    audiorouter --control-sink vsink.game --action unmute
+
+    # toggle mute
+    audiorouter --control-sink vsink.game --action toggle-mute
+
+    # absolute volume
+    audiorouter --control-sink vsink.game --action set-volume --value 50%
+
+    # relative volume (step up/down)
+    audiorouter --control-sink vsink.game --action change-volume --value +5%
+    audiorouter --control-sink vsink.game --action change-volume --value -5%
+
+This lets you control individual `vsink.*` buses without custom shell scripts.
+If you run AudioRouter as Flatpak, run these commands through `flatpak run`
+for the app id.
+
+---
+
 ## Autostart
 
 Autostart can be enabled from within the GUI.
