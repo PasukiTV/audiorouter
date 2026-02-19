@@ -144,10 +144,6 @@ class MainWindow(Adw.ApplicationWindow):
         btn_refresh.connect("clicked", lambda *_: self.refresh_all())
         header.pack_end(btn_refresh)
 
-        btn_companion = Gtk.Button(label="Companion")
-        btn_companion.connect("clicked", lambda *_: self.open_companion_settings())
-        header.pack_end(btn_companion)
-
         split = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
         split.set_position(560)
         split.set_resize_start_child(True)
@@ -330,7 +326,6 @@ class MainWindow(Adw.ApplicationWindow):
         help_menu.append("Donate", "win.donate")
 
         root_menu = Gio.Menu()
-        root_menu.append("Companion", "win.open_companion")
         root_menu.append_submenu("Configuration", cfg_menu)
         root_menu.append_submenu("DEBUG", debug_menu)
         root_menu.append_submenu("Help", help_menu)
