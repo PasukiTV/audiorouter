@@ -141,6 +141,15 @@ Examples:
 Mute values are sent as `1` (muted) or `0` (unmuted).
 Volume values are sent as percent integer (e.g. `38`).
 
+Debugging Companion sync from SSH/CLI:
+
+    audiorouter --control-sink vsink.browser --action toggle-mute --companion-debug
+    audiorouter --show-companion-log
+
+Log file:
+
+    ~/.local/state/audiorouter/companion-sync.log
+
 ---
 
 ## Autostart
